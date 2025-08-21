@@ -24,7 +24,7 @@ GPhotoPaper is a macOS application that allows you to use photos from a dedicate
 
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/your-username/GPhotoPaper.git
+    git clone https://github.com/andrewmy/GPhotoPaper.git
     cd GPhotoPaper
     ```
 
