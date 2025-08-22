@@ -40,17 +40,19 @@ struct GPhotoPaperApp: App {
                     Task {
                         if let albumId = settings.appCreatedAlbumId {
                             do {
-                                let albumExists = try await photosService.verifyAlbumExists(albumId: albumId)
-                                if !albumExists {
+                                let album = try await photosService.verifyAlbumExists(albumId: albumId)
+                                if album == nil {
                                     settings.appCreatedAlbumId = nil
                                     settings.appCreatedAlbumName = nil
+                                    settings.appCreatedAlbumProductUrl = nil
                                     settings.showNoPicturesWarning = true
                                     print("Album with ID \(albumId) no longer exists. Clearing stored album.")
                                 } else {
+                                    settings.appCreatedAlbumProductUrl = album?.productUrl
                                     let mediaItems = try await photosService.searchPhotos(in: albumId)
                                     settings.albumPictureCount = mediaItems.count
                                     settings.showNoPicturesWarning = (mediaItems.count == 0)
-                                    print("Album \(albumId) exists with \(mediaItems.count) pictures.")
+                                    print("GPhotoPaperApp: Album \(albumId) exists with \(mediaItems.count) pictures. showNoPicturesWarning: \(settings.showNoPicturesWarning)")
                                 }
                             } catch {
                                 print("Error during album verification or photo search on app start: \(error.localizedDescription)")
@@ -67,6 +69,28 @@ struct GPhotoPaperApp: App {
                     let newPhotosService = GooglePhotosService(authService: authService, settings: newSettings)
                     self.photosService = newPhotosService
                     self.wallpaperManager = WallpaperManager(photosService: newPhotosService, settings: newSettings)
+
+                    // After new services are set up, re-check album if one was previously selected
+                    if let albumId = newSettings.appCreatedAlbumId {
+                        Task {
+                            do {
+                                if let album = try await newPhotosService.verifyAlbumExists(albumId: albumId) {
+                                    newSettings.appCreatedAlbumProductUrl = album.productUrl
+                                    let mediaItems = try await newPhotosService.searchPhotos(in: albumId)
+                                    newSettings.albumPictureCount = mediaItems.count
+                                    newSettings.showNoPicturesWarning = (mediaItems.count == 0)
+                                } else {
+                                    newSettings.appCreatedAlbumId = nil
+                                    newSettings.appCreatedAlbumName = nil
+                                    newSettings.appCreatedAlbumProductUrl = nil
+                                    newSettings.showNoPicturesWarning = true
+                                }
+                            } catch {
+                                print("Error re-verifying album on auth change: \(error.localizedDescription)")
+                                newSettings.showNoPicturesWarning = true
+                            }
+                        }
+                    }
                 }
         }
     }

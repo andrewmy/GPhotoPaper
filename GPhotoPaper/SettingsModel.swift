@@ -29,6 +29,7 @@ class SettingsModel: ObservableObject {
     // App-created album ID for persistent storage
     @Published var appCreatedAlbumId: String? { didSet { saveSettings() } }
     @Published var appCreatedAlbumName: String? { didSet { saveSettings() } }
+    @Published var appCreatedAlbumProductUrl: URL? { didSet { saveSettings() } }
     @Published var lastPickedIndex: Int { didSet { saveSettings() } }
     @Published var albumPictureCount: Int = 0
     @Published var showNoPicturesWarning: Bool = false

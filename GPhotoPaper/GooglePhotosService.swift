@@ -160,14 +160,13 @@ class GooglePhotosService: ObservableObject {
         }
     }
     
-    func verifyAlbumExists(albumId: String) async throws -> Bool {
+    func verifyAlbumExists(albumId: String) async throws -> GooglePhotosAlbum? {
         do {
             let albums = try await listAlbums()
-            return albums.contains(where: { $0.id == albumId })
+            return albums.first(where: { $0.id == albumId })
         } catch {
-            // Handle specific errors if needed, e.g., network issues
             print("Error verifying album existence: \(error.localizedDescription)")
-            return false
+            return nil
         }
     }
 
@@ -194,20 +193,27 @@ class GooglePhotosService: ObservableObject {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody, options: [])
 
+        print("DEBUG: searchPhotos - Requesting URL: \(url.absoluteString)")
+        print("DEBUG: searchPhotos - Request Body: \(String(data: request.httpBody!, encoding: .utf8) ?? "N/A")")
+
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
             let responseBody = String(data: data, encoding: .utf8) ?? "N/A"
+            print("DEBUG: searchPhotos - Network Error Response: \(responseBody)")
             throw GooglePhotosServiceError.networkError(statusCode: statusCode, response: responseBody)
         }
+
+        print("DEBUG: searchPhotos - Raw Data: \(String(data: data, encoding: .utf8) ?? "N/A")")
 
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
             let searchResponse = try decoder.decode(SearchMediaItemsResponse.self, from: data)
             var mediaItems = searchResponse.mediaItems ?? []
+            print("DEBUG: searchPhotos - Decoded mediaItems count: \(mediaItems.count)")
             
             if settings.horizontalPhotosOnly {
                 mediaItems = mediaItems.filter { item in

@@ -12,7 +12,11 @@ struct SettingsView: View {
         Form {
             Section(header: Text("Google Photos Album")) {
                 if let albumName = settings.appCreatedAlbumName {
-                    Text("Using album: \(albumName)")
+                    if let albumUrl = settings.appCreatedAlbumProductUrl {
+                        Link("Using album: \(albumName)", destination: albumUrl)
+                    } else {
+                        Text("Using album: \(albumName)")
+                    }
                     if settings.showNoPicturesWarning {
                         if settings.albumPictureCount == 0 {
                             Text("Warning: No pictures found in this album.")
@@ -81,6 +85,7 @@ struct SettingsView: View {
                                 let mediaItems = try await photosService.searchPhotos(in: albumId)
                                 settings.albumPictureCount = mediaItems.count
                                 settings.showNoPicturesWarning = (mediaItems.count == 0)
+                                print("SettingsView: Refreshed album picture count: \(settings.albumPictureCount). showNoPicturesWarning: \(settings.showNoPicturesWarning)")
                                 if mediaItems.count == 0 {
                                     errorMessage = "No pictures found in the selected album. Please add photos to the album in Google Photos."
                                 } else {
