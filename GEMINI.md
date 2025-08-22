@@ -9,8 +9,7 @@ Please follow these guidelines when contributing to this repository:
 - Add code comments only for complex or unintuitive code
 - Error messages must be concise but very precise
 - Always first present the action plan to the user and only proceed with code changes after confirmation
-- Include the prompt used to generate the code in the commit message
-
+- Write informative but concise git commit messages. If multi-line messages are impossible, write a detailed message while staying in a single line
 
 
 ## Tool Usage Guidelines
