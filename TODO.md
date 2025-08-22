@@ -1,26 +1,26 @@
 # GPhotoPaper Development Checklist
 
-This document outlines the remaining tasks for the GPhotoPaper macOS application.
+This document outlines the remaining tasks for the GPhotoPaper macOS application, now pivoting to OneDrive for photo management.
 
 ## Core Features
 
-- [x] **Authentication**
-  - [x] Sign in to a Google account.
-  - [x] Sign out from a Google account.
-  - [x] Request `https://www.googleapis.com/auth/photoslibrary.appendonly` scope.
-  - [x] Request `https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata` scope.
+- [ ] **Authentication**
+  - [ ] Implement OneDrive OAuth 2.0 authentication.
+  - [ ] Sign in to a OneDrive account.
+  - [ ] Sign out from a OneDrive account.
 
-- [x] **App-Managed Album**
-  - [x] Implement logic to create an album with a unique, human-friendly name ("GPhotoPaper" or "GPhotoPaper - UUID").
-  - [x] Persist the ID and name of the app-created album using `UserDefaults`.
-  - [x] Display instructions to the user to add photos to the app-created album.
-  - [x] On app start, check that the album is still available.
-  - [x] On retrieving the stored album, check picture count.
-  - [x] If there are no pictures, show a warning.
-  - [x] Add a link to quickly access the album wherever it is mentioned.
+- [ ] **OneDrive Album Management**
+  - [ ] Implement logic to list user's OneDrive albums/folders.
+  - [ ] Implement UI for user to select an existing OneDrive album/folder.
+  - [ ] Implement logic to create a new OneDrive album/folder if user chooses.
+  - [ ] Persist the ID and name of the selected OneDrive album/folder using `UserDefaults`.
+  - [ ] On app start, check that the selected OneDrive album/folder is still available.
+  - [ ] On retrieving the stored album/folder, check picture count.
+  - [ ] If there are no pictures, show a warning.
+  - [ ] Add a link to quickly access the selected OneDrive album/folder wherever it is mentioned.
 
 - [x] **Settings User Interface (UI)**
-  - [x] Display UI for "Create/Manage App Album".
+  - [x] Display UI for "Create/Manage App Album". (Will be updated for OneDrive)
   - [x] Implement UI for choosing picture change frequency ("Never", "Every Hour", "Every 6 Hours", "Daily").
   - [x] Implement UI for choosing to pick the next picture randomly or in time sequence.
   - [x] Implement UI for choosing minimum picture width (default to desktop resolution).
@@ -28,8 +28,8 @@ This document outlines the remaining tasks for the GPhotoPaper macOS application
   - [x] Implement a button to change the wallpaper immediately.
   - [x] Refresh picture count on "Change Wallpaper Now" button click.
 
-- [x] **Core Wallpaper Functionality**
-  - [x] Implement logic to fetch photos from the app-created album using `photoslibrary.readonly.appcreateddata` scope.
+- [ ] **Core Wallpaper Functionality**
+  - [ ] Implement logic to fetch photos from the selected OneDrive album/folder.
   - [x] Implement logic to filter photos by minimum width.
   - [x] Implement logic to filter photos by aspect ratio (horizontal only).
   - [x] Implement logic to pick the next picture randomly or in time sequence.
