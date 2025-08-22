@@ -4,6 +4,7 @@ struct SettingsView: View {
     @ObservedObject var settings: SettingsModel
     @EnvironmentObject var authService: GoogleAuthService
     @EnvironmentObject var photosService: GooglePhotosService
+    @EnvironmentObject var wallpaperManager: WallpaperManager
 
     @State private var errorMessage: String? = nil
 
@@ -55,7 +56,9 @@ struct SettingsView: View {
 
             Section {
                 Button("Change Wallpaper Now") {
-                    // Action to change wallpaper immediately
+                    Task {
+                        await wallpaperManager.updateWallpaper()
+                    }
                 }
             }
         }
@@ -70,8 +73,19 @@ struct SettingsView: View {
 
     private func createAndSetAlbum() async {
         errorMessage = nil
-        let defaultAlbumName = "GPhotoPaper" // Corrected default name
+        let defaultAlbumName = "GPhotoPaper"
         do {
+            // First, check if an album with the default name already exists
+            let existingAlbums = try await photosService.listAlbums(albumName: defaultAlbumName)
+            if let existingAlbum = existingAlbums.first {
+                settings.appCreatedAlbumId = existingAlbum.id
+                settings.appCreatedAlbumName = existingAlbum.title
+                UserDefaults.standard.set(existingAlbum.id, forKey: "appCreatedAlbumId")
+                UserDefaults.standard.set(existingAlbum.title, forKey: "appCreatedAlbumName")
+                return
+            }
+
+            // If no existing album, proceed to create a new one
             var album: GooglePhotosAlbum
             do {
                 // Try creating with default name first
@@ -79,7 +93,7 @@ struct SettingsView: View {
             } catch let error as GooglePhotosServiceError {
                 // If it's a conflict error (album already exists), try with UUID
                 if case .networkError(let statusCode, _) = error, statusCode == 409 { // 409 Conflict
-                    let uniqueAlbumName = "\(defaultAlbumName) - \(UUID().uuidString.prefix(8))" // Use defaultAlbumName here
+                    let uniqueAlbumName = "\(defaultAlbumName) - \(UUID().uuidString.prefix(8))"
                     album = try await photosService.createAppAlbum(albumName: uniqueAlbumName)
                 } else {
                     throw error // Re-throw other errors
@@ -88,7 +102,8 @@ struct SettingsView: View {
 
             settings.appCreatedAlbumId = album.id
             settings.appCreatedAlbumName = album.title
-            // Persist album ID (will implement later using UserDefaults)
+            UserDefaults.standard.set(album.id, forKey: "appCreatedAlbumId")
+            UserDefaults.standard.set(album.title, forKey: "appCreatedAlbumName")
         } catch {
             errorMessage = error.localizedDescription
         }

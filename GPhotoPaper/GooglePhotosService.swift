@@ -49,20 +49,31 @@ struct SearchMediaItemsResponse: Decodable {
 }
 
 // For creating album
-struct NewAlbum: Encodable {
+struct NewAlbumContent: Encodable {
     let title: String
 }
 
-struct CreateAlbumResponse: Decodable {
-    let album: GooglePhotosAlbum // Re-using GooglePhotosAlbum struct
+struct NewAlbum: Encodable {
+    let album: NewAlbumContent
+
+    enum CodingKeys: String, CodingKey {
+        case album
+    }
 }
 
-class GooglePhotosService: ObservableObject { // Added ObservableObject
-    private let authService: GoogleAuthService // Dependency injection for auth service
+struct ListAlbumsResponse: Decodable {
+    let albums: [GooglePhotosAlbum]?
+    let nextPageToken: String?
+}
+
+class GooglePhotosService: ObservableObject {
+    private let authService: GoogleAuthService
+    private let settings: SettingsModel
     private let baseURL = "https://photoslibrary.googleapis.com/v1"
 
-    init(authService: GoogleAuthService) {
+    init(authService: GoogleAuthService, settings: SettingsModel) {
         self.authService = authService
+        self.settings = settings
     }
 
     // Removed listAlbums()
@@ -72,9 +83,7 @@ class GooglePhotosService: ObservableObject { // Added ObservableObject
             throw GooglePhotosServiceError.notAuthenticated
         }
 
-        guard let accessToken = try await user.refreshTokensIfNeeded().accessToken.tokenString else {
-            throw GooglePhotosServiceError.notAuthenticated
-        }
+        let accessToken = try await user.refreshTokensIfNeeded().accessToken.tokenString
 
         guard let url = URL(string: "\(baseURL)/albums") else {
             throw GooglePhotosServiceError.invalidURL
@@ -86,7 +95,7 @@ class GooglePhotosService: ObservableObject { // Added ObservableObject
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
 
-        let newAlbum = NewAlbum(title: albumName)
+        let newAlbum = NewAlbum(album: NewAlbumContent(title: albumName))
         request.httpBody = try JSONEncoder().encode(newAlbum)
 
         print("DEBUG: Creating album URL: \(url.absoluteString)")
@@ -101,14 +110,63 @@ class GooglePhotosService: ObservableObject { // Added ObservableObject
             print("DEBUG: Create Album Error Response: \(responseBody)")
             throw GooglePhotosServiceError.networkError(statusCode: statusCode, response: responseBody)
         }
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let responseBody = String(data: data, encoding: .utf8) ?? "N/A"
+        print("DEBUG: Create Album Response: \(responseBody)")
 
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
-            let createAlbumResponse = try decoder.decode(CreateAlbumResponse.self, from: data)
-            return createAlbumResponse.album
+            let album = try decoder.decode(GooglePhotosAlbum.self, from: data)
+            return album
         } catch {
-            print("DEBUG: Decoding Error Create Album: \(error.localizedDescription)")
+            throw GooglePhotosServiceError.decodingError(error)
+        }
+    }
+
+    func listAlbums(albumName: String? = nil) async throws -> [GooglePhotosAlbum] {
+        guard let user = await authService.user else {
+            throw GooglePhotosServiceError.notAuthenticated
+        }
+
+        let accessToken = try await user.refreshTokensIfNeeded().accessToken.tokenString
+        print("DEBUG: Access Token for List Albums: \(accessToken)")
+
+        guard let url = URL(string: "\(baseURL)/albums") else {
+            throw GooglePhotosServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        print("DEBUG: List Albums Raw Data: \(String(data: data, encoding: .utf8) ?? "N/A")")
+        if let httpResponse = response as? HTTPURLResponse {
+            print("DEBUG: List Albums HTTP Status Code: \(httpResponse.statusCode)")
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let responseBody = String(data: data, encoding: .utf8) ?? "N/A"
+            print("DEBUG: List Albums Error Response: \(responseBody)")
+            throw GooglePhotosServiceError.networkError(statusCode: statusCode, response: responseBody)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            let listAlbumsResponse = try decoder.decode(ListAlbumsResponse.self, from: data)
+            if let name = albumName {
+                return listAlbumsResponse.albums?.filter { $0.title == name } ?? []
+            } else {
+                return listAlbumsResponse.albums ?? []
+            }
+        } catch {
+            print("DEBUG: Decoding Error List Albums: \(error.localizedDescription)")
             throw GooglePhotosServiceError.decodingError(error)
         }
     }
@@ -118,9 +176,7 @@ class GooglePhotosService: ObservableObject { // Added ObservableObject
             throw GooglePhotosServiceError.notAuthenticated
         }
 
-        guard let accessToken = try await user.refreshTokensIfNeeded().accessToken.tokenString else {
-            throw GooglePhotosServiceError.notAuthenticated
-        }
+        let accessToken = try await user.refreshTokensIfNeeded().accessToken.tokenString
 
         guard let url = URL(string: "\(baseURL)/mediaItems:search") else {
             throw GooglePhotosServiceError.invalidURL
@@ -134,7 +190,19 @@ class GooglePhotosService: ObservableObject { // Added ObservableObject
 
         let requestBody: [String: Any] = [
             "albumId": albumId,
-            "pageSize": 100 // Request up to 100 media items
+            "pageSize": 100, // Request up to 100 media items
+            "filters": [
+                "mediaTypeFilter": [
+                    "mediaTypes": ["PHOTO"]
+                ],
+                "featureFilter": [
+                    "includedFeatures": ["AUTOCREATED"]
+                ],
+                "contentFilter": [
+                    "minWidth": settings.minimumPictureWidth,
+                    "minHeight": settings.minimumPictureWidth // Assuming square for min height for now, will adjust if needed
+                ]
+            ]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody, options: [])
 
@@ -155,7 +223,17 @@ class GooglePhotosService: ObservableObject { // Added ObservableObject
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
             let searchResponse = try decoder.decode(SearchMediaItemsResponse.self, from: data)
-            return searchResponse.mediaItems
+            var mediaItems = searchResponse.mediaItems
+            
+            if settings.horizontalPhotosOnly {
+                mediaItems = mediaItems.filter { item in
+                    guard let width = Double(item.mediaMetadata.width),
+                          let height = Double(item.mediaMetadata.height) else { return false }
+                    return width > height
+                }
+            }
+            
+            return mediaItems
         } catch {
             print("DEBUG: Decoding Error for search: \(error.localizedDescription)")
             throw GooglePhotosServiceError.decodingError(error)
