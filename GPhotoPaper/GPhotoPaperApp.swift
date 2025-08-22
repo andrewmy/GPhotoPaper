@@ -36,6 +36,29 @@ struct GPhotoPaperApp: App {
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
                 }
+                .onAppear {
+                    Task {
+                        if let albumId = settings.appCreatedAlbumId {
+                            do {
+                                let albumExists = try await photosService.verifyAlbumExists(albumId: albumId)
+                                if !albumExists {
+                                    settings.appCreatedAlbumId = nil
+                                    settings.appCreatedAlbumName = nil
+                                    settings.showNoPicturesWarning = true
+                                    print("Album with ID \(albumId) no longer exists. Clearing stored album.")
+                                } else {
+                                    let mediaItems = try await photosService.searchPhotos(in: albumId)
+                                    settings.albumPictureCount = mediaItems.count
+                                    settings.showNoPicturesWarning = (mediaItems.count == 0)
+                                    print("Album \(albumId) exists with \(mediaItems.count) pictures.")
+                                }
+                            } catch {
+                                print("Error during album verification or photo search on app start: \(error.localizedDescription)")
+                                settings.showNoPicturesWarning = true // Show warning on error
+                            }
+                        }
+                    }
+                }
                 .onChange(of: authService.user) { _ in
                     // When the user signs in or out, create a new SettingsModel
                     // to ensure we have a clean slate.

@@ -13,11 +13,30 @@ struct SettingsView: View {
             Section(header: Text("Google Photos Album")) {
                 if let albumName = settings.appCreatedAlbumName {
                     Text("Using album: \(albumName)")
-                    Text("Please add photos to this album in Google Photos.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if settings.showNoPicturesWarning {
+                        if settings.albumPictureCount == 0 {
+                            Text("Warning: No pictures found in this album.")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        } else {
+                            // This case should ideally not happen if showNoPicturesWarning is true
+                            // but albumPictureCount is not 0. It implies album no longer exists.
+                            Text("Warning: Selected album no longer exists or is inaccessible.")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    } else {
+                        Text("Pictures in album: \(settings.albumPictureCount)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 } else {
                     Text("No app-managed album found.")
+                    if settings.showNoPicturesWarning {
+                        Text("Warning: The previously selected album no longer exists or is inaccessible. Please create a new one.")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
                     Button("Create New Album") {
                         Task {
                             await createAndSetAlbum()
@@ -57,7 +76,24 @@ struct SettingsView: View {
             Section {
                 Button("Change Wallpaper Now") {
                     Task {
-                        await wallpaperManager.updateWallpaper()
+                        if let albumId = settings.appCreatedAlbumId {
+                            do {
+                                let mediaItems = try await photosService.searchPhotos(in: albumId)
+                                settings.albumPictureCount = mediaItems.count
+                                settings.showNoPicturesWarning = (mediaItems.count == 0)
+                                if mediaItems.count == 0 {
+                                    errorMessage = "No pictures found in the selected album. Please add photos to the album in Google Photos."
+                                } else {
+                                    await wallpaperManager.updateWallpaper()
+                                }
+                            } catch {
+                                errorMessage = "Failed to refresh picture count or update wallpaper: \(error.localizedDescription)"
+                                settings.showNoPicturesWarning = true
+                            }
+                        } else {
+                            errorMessage = "No album selected. Please create or select an album first."
+                            settings.showNoPicturesWarning = true
+                        }
                     }
                 }
             }

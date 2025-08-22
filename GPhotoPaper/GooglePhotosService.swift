@@ -160,6 +160,17 @@ class GooglePhotosService: ObservableObject {
         }
     }
     
+    func verifyAlbumExists(albumId: String) async throws -> Bool {
+        do {
+            let albums = try await listAlbums()
+            return albums.contains(where: { $0.id == albumId })
+        } catch {
+            // Handle specific errors if needed, e.g., network issues
+            print("Error verifying album existence: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func searchPhotos(in albumId: String) async throws -> [MediaItem] {
         guard let user = await authService.user else {
             throw GooglePhotosServiceError.notAuthenticated
