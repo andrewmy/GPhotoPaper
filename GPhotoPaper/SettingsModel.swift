@@ -39,7 +39,9 @@ class SettingsModel: ObservableObject {
         self.changeFrequency = UserDefaults.standard.string(forKey: "changeFrequency").flatMap(WallpaperChangeFrequency.init(rawValue:)) ?? .daily
         self.pickRandomly = UserDefaults.standard.bool(forKey: "pickRandomly")
         let initialMinimumPictureWidth = UserDefaults.standard.double(forKey: "minimumPictureWidth")
-        self.minimumPictureWidth = initialMinimumPictureWidth == 0.0 ? Double(NSScreen.main?.frame.width ?? 1920.0) : initialMinimumPictureWidth
+        self.minimumPictureWidth = initialMinimumPictureWidth == 0.0
+            ? Self.recommendedMinimumPictureWidthPixels()
+            : initialMinimumPictureWidth
         self.horizontalPhotosOnly = UserDefaults.standard.bool(forKey: "horizontalPhotosOnly")
         self.wallpaperFillMode = UserDefaults.standard.string(forKey: "wallpaperFillMode").flatMap(WallpaperFillMode.init(rawValue:)) ?? .fill
         self.selectedAlbumId = UserDefaults.standard.string(forKey: "selectedAlbumId")
@@ -48,6 +50,14 @@ class SettingsModel: ObservableObject {
         self.lastPickedIndex = UserDefaults.standard.integer(forKey: "lastPickedIndex")
         let lastUpdateTimestamp = UserDefaults.standard.double(forKey: "lastSuccessfulWallpaperUpdate")
         self.lastSuccessfulWallpaperUpdate = lastUpdateTimestamp > 0 ? Date(timeIntervalSince1970: lastUpdateTimestamp) : nil
+    }
+
+    private static func recommendedMinimumPictureWidthPixels() -> Double {
+        // Use the effective (“Looks like …”) desktop width, not the HiDPI backing buffer width.
+        // For scaled external displays, macOS can render into a larger offscreen buffer and downsample
+        // to the panel's physical pixels; using the backing size can over-filter.
+        let widths = NSScreen.screens.map { screen in Double(screen.frame.width) }
+        return widths.max() ?? 1920.0
     }
 
     private func saveSettings() {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -18,6 +19,11 @@ struct SettingsView: View {
 #if DEBUG
     @State private var oneDriveDebugInfo: String?
 #endif
+
+    private var recommendedMinimumPictureWidthPixels: Double {
+        let widths = NSScreen.screens.map { screen in Double(screen.frame.width) }
+        return widths.max() ?? 1920.0
+    }
 
     var body: some View {
         Form {
@@ -281,6 +287,12 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
                     Text("px")
+                    let recommended = recommendedMinimumPictureWidthPixels
+                    Button("Use Recommended (\(Int(recommended))px)") {
+                        settings.minimumPictureWidth = recommended
+                    }
+                    .disabled(Int(settings.minimumPictureWidth.rounded()) == Int(recommended.rounded()))
+                    .help("Sets minimum width to the largest connected display width in the effective (“Looks like …”) resolution (\(Int(recommended))px).")
                 }
 
                 Toggle("Only Horizontal Photos", isOn: $settings.horizontalPhotosOnly)
