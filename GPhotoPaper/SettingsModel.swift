@@ -31,6 +31,7 @@ class SettingsModel: ObservableObject {
     @Published var selectedAlbumName: String? { didSet { saveSettings() } }
     @Published var selectedAlbumWebUrl: URL? { didSet { saveSettings() } }
     @Published var lastPickedIndex: Int { didSet { saveSettings() } }
+    @Published var lastSuccessfulWallpaperUpdate: Date? { didSet { saveSettings() } }
     @Published var albumPictureCount: Int = 0
     @Published var showNoPicturesWarning: Bool = false
 
@@ -45,6 +46,8 @@ class SettingsModel: ObservableObject {
         self.selectedAlbumName = UserDefaults.standard.string(forKey: "selectedAlbumName")
         self.selectedAlbumWebUrl = UserDefaults.standard.string(forKey: "selectedAlbumWebUrl").flatMap(URL.init(string:))
         self.lastPickedIndex = UserDefaults.standard.integer(forKey: "lastPickedIndex")
+        let lastUpdateTimestamp = UserDefaults.standard.double(forKey: "lastSuccessfulWallpaperUpdate")
+        self.lastSuccessfulWallpaperUpdate = lastUpdateTimestamp > 0 ? Date(timeIntervalSince1970: lastUpdateTimestamp) : nil
     }
 
     private func saveSettings() {
@@ -57,5 +60,10 @@ class SettingsModel: ObservableObject {
         UserDefaults.standard.set(selectedAlbumName, forKey: "selectedAlbumName")
         UserDefaults.standard.set(selectedAlbumWebUrl?.absoluteString, forKey: "selectedAlbumWebUrl")
         UserDefaults.standard.set(lastPickedIndex, forKey: "lastPickedIndex")
+        if let lastSuccessfulWallpaperUpdate {
+            UserDefaults.standard.set(lastSuccessfulWallpaperUpdate.timeIntervalSince1970, forKey: "lastSuccessfulWallpaperUpdate")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "lastSuccessfulWallpaperUpdate")
+        }
     }
 }

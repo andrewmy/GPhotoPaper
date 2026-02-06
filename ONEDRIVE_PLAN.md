@@ -104,7 +104,36 @@ Current implementation uses the bundles endpoints and identifies “album-like�
   - Auto-load albums on startup when signed in (so the picker appears without manual reload).
   - Keep manual ID entry + full scan behind “Advanced”.
 
-### Phase 4 — Offline mode (planned)
+### Phase 3.5 — MVP wallpaper + app-shell polish (next)
+
+Goal: make wallpaper changes reliable and user-visible for MVP, without changing the wallpaper on app launch.
+
+Immediate (MVP) improvements (priority order: reliability → UX/status → selection quality):
+
+- Multi-monitor (MVP): set the **same** wallpaper on **all** screens (not just the main screen).
+- Update serialization (MVP): prevent overlapping wallpaper updates (timer tick + “Change Now” + album change).
+  - Policy: **manual overrides timer** (manual cancels/replaces timer-driven work; timer ticks never interrupt a manual update).
+- Status + errors (MVP): stop relying on `print()` as the only feedback.
+  - Persist and show: last successful update time, last error (if any), and the selected album identity.
+  - Disable or explain “Change Wallpaper Now” when signed out or no album is selected.
+- Timer UX (MVP): interval-based schedule with clear status.
+  - Next auto change is computed as: `next = lastSuccessfulWallpaperUpdate + interval`.
+  - Manual changes update `lastSuccessfulWallpaperUpdate` (so manual resets the schedule), and the UI shows “Last changed” + “Next change”.
+- Graph resilience (MVP): add a small retry/backoff policy for transient errors (429 / 5xx) and handle token failures cleanly.
+- Local file handling (MVP): write wallpapers with correct file type/extension (don’t always write `wallpaper.jpg` if the bytes are PNG/HEIC).
+  - Keep atomic writes, and avoid leaving partial files behind if downloads fail.
+- Menu bar (MVP): add a status item for quick control + visibility (even when the window is closed).
+  - Minimum actions: Change Now, Pause/Resume, Open Settings, Sign In/Out, Open Selected Album.
+  - Minimum status: signed-in state + last update / last error indicator.
+- Selection quality (MVP, lightweight): reduce obvious repeats and avoid expensive full-album scans on every tick when possible.
+  - Example approach: cache the last fetched item list (with a TTL) and re-use it for selection.
+
+Non-goals for MVP (explicit):
+
+- Do **not** change wallpaper automatically on app launch (user should trigger manually or wait for next interval).
+- Do **not** implement “different wallpaper per display” in MVP (post-MVP).
+
+### Phase 4 — Offline mode (planned; post-MVP)
 
 Goal: a workable experience when Graph is temporarily unavailable.
 
@@ -112,12 +141,12 @@ Goal: a workable experience when Graph is temporarily unavailable.
 - If a wallpaper update fails (offline, token issue, Graph errors), fall back to cached images instead of failing silently.
 - UX: surface an “offline / last updated” status and guidance to re-auth / retry.
 
-### Phase 5 — Album write operations (planned; separate)
+### Phase 5 — Album write operations (planned; post-MVP / separate)
 
 - Create album UI (requires `Files.ReadWrite`)
 - Add/remove items from an album within the app (also `Files.ReadWrite`) to support curation without leaving the app
 
-### Phase 6 — Wallpaper suitability filtering (planned)
+### Phase 6 — Wallpaper suitability filtering (planned; post-MVP)
 
 Goal: prefer images that will look good as wallpaper on the current Mac (and later, multiple displays).
 
@@ -134,7 +163,7 @@ Goal: prefer images that will look good as wallpaper on the current Mac (and lat
   - Avoid duplicates (same item id) and repeat too frequently.
   - Prefer recent photos or favorites (if Graph metadata supports it later).
 
-### Phase 7 — Testing & hardening
+### Phase 7 — Testing & hardening (ongoing; expand post-MVP)
 
 - Unit tests:
   - Token handling boundaries (signed out, expired token) via mocks.
@@ -142,7 +171,28 @@ Goal: prefer images that will look good as wallpaper on the current Mac (and lat
 - UX checks:
   - Error messaging for “not configured” vs “not signed in” vs “no albums/photos”.
   - Behavior when album disappears or loses permissions.
-- Multi-monitor support (later): decide per-screen vs all screens.
+- Multi-monitor support (post-MVP): allow **different** wallpapers per screen and per-screen fill/scaling options.
+
+## Nice-to-have backlog (post-MVP)
+
+These are desirable, but not required to ship MVP.
+
+- Launch at login (and a “running in menu bar” primary UX if desired).
+- Advanced scheduling triggers:
+  - Change on wake / unlock
+  - Time-of-day scheduling (not just fixed intervals)
+- Offline-first improvements:
+  - Prefetch a small ring buffer so updates succeed while offline.
+  - Persist a lightweight cache of album item IDs/metadata to reduce Graph work across launches.
+- Photo history + undo:
+  - Keep recent wallpapers, show a small history, and allow “back” / “favorite”.
+- “Now playing” style info:
+  - Show the current wallpaper’s filename / date / source (album) and provide “Open in OneDrive”.
+- Selection/quality heuristics:
+  - Stronger de-duplication (avoid repeats within N changes).
+  - Better aspect ratio matching per display and fill mode.
+- Multi-account support:
+  - Switch between personal Microsoft accounts and bind albums per account.
 
 ## Cleanup checklist
 

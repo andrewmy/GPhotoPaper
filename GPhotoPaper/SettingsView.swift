@@ -30,6 +30,7 @@ struct SettingsView: View {
                     }
                     Button("Sign Out") {
                         authService.signOut()
+                        wallpaperManager.stopWallpaperUpdates()
                         albums = []
                         didAttemptLoadAlbums = false
                         didAutoLoadAlbums = false
@@ -234,6 +235,44 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.menu)
 
+                HStack {
+                    Text("Last changed")
+                    Spacer()
+                    if let last = wallpaperManager.lastSuccessfulUpdate {
+                        Text(last, style: .relative)
+                            .foregroundStyle(.secondary)
+                            .help(last.formatted(date: .abbreviated, time: .shortened))
+                    } else {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack {
+                    Text("Next change")
+                    Spacer()
+                    if settings.changeFrequency == .never {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                    } else if let next = wallpaperManager.nextScheduledUpdate {
+                        Text(next, style: .relative)
+                            .foregroundStyle(.secondary)
+                            .help(next.formatted(date: .abbreviated, time: .shortened))
+                    } else {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let error = wallpaperManager.lastUpdateError, !error.isEmpty {
+                    Text("Last error: \(error)")
+                        .font(.system(.caption))
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Toggle("Pick Randomly", isOn: $settings.pickRandomly)
 
                 HStack {
@@ -256,9 +295,7 @@ struct SettingsView: View {
 
             Section {
                 Button("Change Wallpaper Now") {
-                    Task {
-                        await wallpaperManager.updateWallpaper()
-                    }
+                    wallpaperManager.requestWallpaperUpdate(trigger: .manual)
                 }
             }
         }
@@ -348,6 +385,7 @@ struct SettingsView: View {
         settings.albumPictureCount = 0
         settings.showNoPicturesWarning = false
         selectedAlbumUsableCountFirstPage = nil
+        wallpaperManager.startWallpaperUpdates()
 
         if shouldProbePhotos {
             let idToProbe = album.id
