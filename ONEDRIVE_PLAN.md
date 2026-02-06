@@ -17,7 +17,8 @@ This document outlines the plan to integrate OneDrive for photo management, targ
 - Sign in/out (MSAL) and silent token acquisition for scheduled wallpaper updates.
 - List albums, select an album, and fetch image items from that album via Graph.
 - Wallpaper update:
-  - Downloads `@microsoft.graph.downloadUrl`
+  - Downloads via `GET /me/drive/items/{item-id}/content` (authorized)
+  - Does not rely on selecting `@microsoft.graph.downloadUrl` in `$select` (can 400 on some endpoints)
   - Applies filtering (min width, horizontal only) when image dimensions are available
 
 ### Configuration keys (current)
@@ -55,6 +56,12 @@ Current implementation uses the bundles endpoints and identifies “album-like�
 - `bundle.album` when present, OR
 - `webUrl` host `photos.onedrive.com` (matches the OneDrive Photos album UI).
 
+### Learnings / gotchas (Graph)
+
+- Some Graph responses expose `@microsoft.graph.downloadUrl`, but selecting it via `$select` can fail with HTTP 400 (“AnnotationSegment”). Prefer downloading the chosen item using `/content`.
+- For DriveItem `children` expansion, Graph supports only `$select` and `$expand` inside the `$expand` options. Using `$top` inside `children(...)` can fail with HTTP 400 (“Can only provide expand and select for expand options”).
+- For bundle albums, `GET /me/drive/items/{id}/children` can be unreliable; prefer `GET /me/drive/items/{id}?$expand=children(...)` (and page using `children@odata.nextLink`).
+
 ## Remaining work (phased)
 
 ### Phase 1 — Switch auth to MSAL (done)
@@ -84,7 +91,7 @@ Current implementation uses the bundles endpoints and identifies “album-like�
   - Start: `User.Read Files.Read` (MSAL handles OIDC reserved scopes like `offline_access` automatically)
   - Add later if needed: `Files.ReadWrite` (create album / add items).
 
-### Phase 3 — UI update (albums instead of folders) (partially done)
+### Phase 3 — UI update (albums instead of folders) (done)
 
 - Album picker (done):
   - “Load albums” → list bundles
@@ -93,12 +100,41 @@ Current implementation uses the bundles endpoints and identifies “album-like�
   - Link to manage albums in OneDrive Photos
 - Startup behavior / validation:
   - On app start, verify the previously selected album still exists and is accessible.
-  - When loading a stored selection, fetch photo count (or first page) and show a warning if the album has no photos.
-- Optional:
-  - Create album UI (requires `Files.ReadWrite`)
-  - Add item to album from within the app (also `Files.ReadWrite`), if we want to support curation without leaving the app.
+  - When loading a stored selection, probe the first page and show a warning if there are no usable photos.
+  - Auto-load albums on startup when signed in (so the picker appears without manual reload).
+  - Keep manual ID entry + full scan behind “Advanced”.
 
-### Phase 4 — Testing & hardening
+### Phase 4 — Offline mode (planned)
+
+Goal: a workable experience when Graph is temporarily unavailable.
+
+- Cache a “last known good” wallpaper image (and possibly a small ring buffer).
+- If a wallpaper update fails (offline, token issue, Graph errors), fall back to cached images instead of failing silently.
+- UX: surface an “offline / last updated” status and guidance to re-auth / retry.
+
+### Phase 5 — Album write operations (planned; separate)
+
+- Create album UI (requires `Files.ReadWrite`)
+- Add/remove items from an album within the app (also `Files.ReadWrite`) to support curation without leaving the app
+
+### Phase 6 — Wallpaper suitability filtering (planned)
+
+Goal: prefer images that will look good as wallpaper on the current Mac (and later, multiple displays).
+
+- Minimum resolution:
+  - Prefer images with pixel dimensions >= current screen pixel size (account for Retina scaling).
+  - Decide behavior when width/height metadata is missing: allow, deprioritize, or download headers to detect dimensions.
+- Orientation and aspect ratio:
+  - Keep “horizontal only” option, but consider aspect-ratio bounds (avoid extreme panoramas unless user opts in).
+  - Optionally match aspect ratio to the current screen more closely (especially for Fill vs Fit).
+- File format / type:
+  - Exclude videos and non-image mime types.
+  - Decide whether to accept formats like HEIC, PNG, GIF (animated), and how to handle alpha/animation.
+- Quality / UX heuristics (optional):
+  - Avoid duplicates (same item id) and repeat too frequently.
+  - Prefer recent photos or favorites (if Graph metadata supports it later).
+
+### Phase 7 — Testing & hardening
 
 - Unit tests:
   - Token handling boundaries (signed out, expired token) via mocks.

@@ -1,8 +1,6 @@
 # GPhotoPaper
 
-GPhotoPaper is a macOS application that automatically changes your desktop wallpaper using photos from OneDrive (via Microsoft Graph).
-
-**Status:** OneDrive sign-in (MSAL) and album-based photo fetching work (Graph bundle albums; see `ONEDRIVE_PLAN.md`).
+GPhotoPaper is a macOS app that automatically changes your desktop wallpaper using photos from a OneDrive album.
 
 ## Features
 
@@ -10,7 +8,7 @@ GPhotoPaper is a macOS application that automatically changes your desktop wallp
 *   **Customizable Photo Selection**: Choose between random or sequential photo picking.
 *   **Image Filtering**: Filter photos by minimum width and orientation (horizontal only).
 *   **Wallpaper Fill Mode**: Control how the image fills your desktop (fill, fit, stretch, center).
-*   **OneDrive**: Authenticate, select a OneDrive album (Graph bundle album), and fetch photos via Microsoft Graph.
+*   **OneDrive Album Picker**: Sign in and pick a OneDrive album (advanced: manual album ID).
 
 ## Getting Started
 
@@ -18,30 +16,22 @@ GPhotoPaper is a macOS application that automatically changes your desktop wallp
 
 *   macOS 12.0 or later
 *   Xcode 13.0 or later
-*   A Microsoft Entra ID (Azure) app registration for Microsoft Graph.
+*   A Microsoft Entra ID (Azure) app registration for Microsoft Graph (personal Microsoft accounts).
 
 ### Microsoft App Registration
 
 You’ll need to:
 
-1. Create an app registration (Azure portal): https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
+1. Create an app registration in the Azure portal: https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
 2. Set supported account types to include **personal Microsoft accounts**.
-3. Add a redirect URI that matches `OneDriveRedirectUri` in `GPhotoPaper/Info.plist`.
-   - In the Azure portal, go to your app → **Authentication** → **Add a platform** → **iOS/macOS**.
-   - Enter your app’s **Bundle ID** (from Xcode target settings).
-   - Azure will generate the redirect URI in the format `msauth.<bundle_id>://auth` (this is what the default `OneDriveRedirectUri` is set to).
-4. Add Microsoft Graph delegated permissions:
+3. Add an **iOS/macOS** redirect URI that matches `OneDriveRedirectUri` in `GPhotoPaper/Info.plist`.
+   - Azure will generate the redirect URI in the format `msauth.<bundle_id>://auth`.
+4. Add delegated Microsoft Graph permissions:
    - `User.Read`
    - `Files.Read`
-5. Set your **Application (client) ID** (don’t commit secrets):
+5. Provide your **Application (client) ID** to the app (don’t commit secrets):
    - Copy `GPhotoPaper/Secrets.xcconfig.example` to `GPhotoPaper/Secrets.xcconfig` (gitignored).
    - Set `ONEDRIVE_CLIENT_ID = ...` in `GPhotoPaper/Secrets.xcconfig`.
-   - Where to find it (Microsoft Entra admin center):
-     - Go to **Microsoft Entra ID** → **App registrations** → select your app.
-     - On the app’s **Overview** page, copy **Application (client) ID**.
-     - If the Entra portal warns that new registrations are deprecated, use the Azure portal instead:
-       - App registrations (Azure portal): https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
-   - The app reads this via `GPhotoPaper/Config.xcconfig` → `ONEDRIVE_CLIENT_ID` → `OneDriveClientId` in `GPhotoPaper/Info.plist`.
 
 ### Troubleshooting
 
@@ -116,13 +106,12 @@ xcodebuild -scheme GPhotoPaper -destination 'platform=macOS' -derivedDataPath /t
 
 1.  Configure the wallpaper change frequency and selection settings in the app.
 2.  Sign in to OneDrive.
-3.  Load albums and select an album (or paste an album ID manually).
+3.  Load albums and select an album.
     - To create/manage albums, use OneDrive Photos (https://photos.onedrive.com) and then reload albums in the app.
+    - If you can’t load albums for some reason, use **Advanced** to paste an album ID manually.
 4.  Click "Change Wallpaper Now" to update immediately.
 
-## Dev Notes
+## Contributing
 
-This section contains notes for developers working on the project.
-
-*   **OneDrive Roadmap**: Refer to [`ONEDRIVE_PLAN.md`](ONEDRIVE_PLAN.md) for the MSAL + Albums plan.
-*   **Repo Guidance**: Refer to [`AGENTS.md`](AGENTS.md) for contributor/Codex notes.
+- Roadmap / implementation notes: `ONEDRIVE_PLAN.md`
+- Repo guidance (contributors/Codex): `AGENTS.md`

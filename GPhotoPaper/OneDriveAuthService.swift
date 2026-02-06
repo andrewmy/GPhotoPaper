@@ -47,6 +47,7 @@ import MSAL
 @MainActor
 final class OneDriveAuthService: ObservableObject {
     @Published private(set) var isSignedIn: Bool = false
+    @Published private(set) var signedInUsername: String?
 
     private let config: OneDriveConfig
     private var application: MSALPublicClientApplication?
@@ -68,11 +69,13 @@ final class OneDriveAuthService: ObservableObject {
             self.application = app
             self.currentAccount = try app.allAccounts().first
             self.isSignedIn = self.currentAccount != nil
+            self.signedInUsername = self.currentAccount?.username
         } catch {
             self.applicationInitError = error
             self.application = nil
             self.currentAccount = nil
             self.isSignedIn = false
+            self.signedInUsername = nil
         }
     }
 
@@ -80,6 +83,7 @@ final class OneDriveAuthService: ObservableObject {
         let accountToRemove = currentAccount
         currentAccount = nil
         isSignedIn = false
+        signedInUsername = nil
 
         guard let application, let accountToRemove else { return }
         do {
@@ -112,6 +116,7 @@ final class OneDriveAuthService: ObservableObject {
             let result = try await acquireTokenInteractive(application: application, params: params)
             currentAccount = result.account
             isSignedIn = true
+            signedInUsername = result.account.username
         } catch {
             throw OneDriveAuthError.msalError(details: Self.describeMSALError(error))
         }
@@ -132,6 +137,7 @@ final class OneDriveAuthService: ObservableObject {
         guard let account else { throw OneDriveAuthError.notSignedIn }
         currentAccount = account
         isSignedIn = true
+        signedInUsername = account.username
         return account
     }
 
@@ -230,6 +236,7 @@ import Security
 @MainActor
 final class OneDriveAuthService: ObservableObject {
     @Published private(set) var isSignedIn: Bool = false
+    @Published private(set) var signedInUsername: String?
 
     private let config: OneDriveConfig
     private let keychain = OneDriveTokenKeychain()
@@ -245,10 +252,12 @@ final class OneDriveAuthService: ObservableObject {
         self.config = config
         self.token = keychain.load()
         self.isSignedIn = self.token != nil
+        self.signedInUsername = nil
     }
 
     func signOut() {
         token = nil
+        signedInUsername = nil
         keychain.delete()
     }
 

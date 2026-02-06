@@ -23,6 +23,13 @@
 - Notes:
   - For some personal accounts, `$filter=bundle/album ne null` can return 0 even when albums exist in OneDrive Photos.
   - The app treats `photos.onedrive.com` bundle URLs as albums (and uses `bundle.album` when available).
+  - Practical Graph quirks:
+    - Selecting `@microsoft.graph.downloadUrl` via `$select` can fail with HTTP 400 (“AnnotationSegment”); prefer downloading with `GET /me/drive/items/{item-id}/content`.
+    - For `children(...)` inside `$expand`, Graph supports only `$select`/`$expand` (using `$top` can 400).
+    - For bundle albums, `GET /me/drive/items/{id}/children` can be unreliable; prefer `GET /me/drive/items/{id}?$expand=children(...)` + `children@odata.nextLink` paging.
+  - UI:
+    - When signed in, albums auto-load on startup so the picker appears without manual reload.
+    - Manual album ID + full scan live behind “Advanced”.
 
 ### Config & scopes (today)
 

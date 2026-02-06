@@ -68,11 +68,9 @@ final class WallpaperManager: ObservableObject {
                 settings.lastPickedIndex = nextIndex
             }
 
-            let imageUrl = selectedPhoto.downloadUrl
-
             let wallpaperFileURL = try ensureWallpaperFileURL()
 
-            let (imageData, _) = try await URLSession.shared.data(from: imageUrl)
+            let imageData = try await photosService.downloadImageData(for: selectedPhoto)
             try imageData.write(to: wallpaperFileURL, options: [.atomic])
 
             guard let screen = NSScreen.main else {

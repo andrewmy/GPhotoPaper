@@ -53,13 +53,29 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
     }
 
     func verifyAlbumExists(albumId: String) async throws -> OneDriveAlbum? {
+        do {
+            let bundleItem: DriveItem = try await get(
+                "/me/drive/bundles/\(albumId)",
+                query: [
+                    .init(name: "$select", value: "id,name,webUrl,bundle"),
+                ]
+            )
+            if Self.isAlbumCandidateStrict(bundleItem) || bundleItem.bundle != nil {
+                return OneDriveAlbum(id: bundleItem.id, webUrl: bundleItem.webUrl, name: bundleItem.name)
+            }
+        } catch {
+            // Fall through to item lookup (some IDs aren't resolvable via the bundles endpoint).
+        }
+
         let item: DriveItem = try await get(
             "/me/drive/items/\(albumId)",
             query: [
-                .init(name: "$select", value: "id,name,webUrl,bundle"),
+                .init(name: "$select", value: "id,name,webUrl,bundle,folder"),
             ]
         )
-        guard Self.isAlbumCandidateStrict(item) else { return nil }
+
+        let isContainer = item.bundle != nil || item.folder != nil || Self.isAlbumCandidateStrict(item)
+        guard isContainer else { return nil }
         return OneDriveAlbum(id: item.id, webUrl: item.webUrl, name: item.name)
     }
 
@@ -70,7 +86,7 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
                 .init(name: "$select", value: "id"),
                 .init(
                     name: "$expand",
-                    value: "children($select=id,name,webUrl,file,image,@microsoft.graph.downloadUrl)"
+                    value: "children($select=id,name,webUrl,file,image,photo)"
                 ),
             ]
         )
@@ -85,6 +101,45 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
         }
 
         return results
+    }
+
+    func probeAlbumUsablePhotoCountFirstPage(albumId: String) async throws -> Int {
+        let expandedChildren: DriveItemExpandedChildrenResponse = try await get(
+            "/me/drive/items/\(albumId)",
+            query: [
+                .init(name: "$select", value: "id"),
+                .init(
+                    name: "$expand",
+                    // Note: for DriveItem children, Graph only supports $select/$expand inside $expand options.
+                    // $top in expand options yields a 400 (invalidRequest).
+                    value: "children($select=id,name,file,image,photo)"
+                ),
+            ]
+        )
+        return Self.mediaItems(from: expandedChildren.children ?? []).count
+    }
+
+    func downloadImageData(for item: MediaItem) async throws -> Data {
+        if let url = item.downloadUrl {
+            let (data, response) = try await session.data(from: url)
+            let http = response as? HTTPURLResponse
+            if let status = http?.statusCode, !(200...299).contains(status) {
+                throw OneDriveGraphError.httpError(status: status, body: String(data: data, encoding: .utf8) ?? "")
+            }
+            return data
+        }
+
+        let accessToken = try await authService.validAccessToken()
+        var request = URLRequest(url: graphURL("/me/drive/items/\(item.id)/content"))
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        let http = response as? HTTPURLResponse
+        if let status = http?.statusCode, !(200...299).contains(status) {
+            throw OneDriveGraphError.httpError(status: status, body: String(data: data, encoding: .utf8) ?? "")
+        }
+
+        return data
     }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
@@ -153,15 +208,20 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
 
     private static func mediaItems(from driveItems: [DriveItem]) -> [MediaItem] {
         driveItems.compactMap { item in
-            guard let download = item.downloadUrl, let downloadURL = URL(string: download) else {
-                return nil
-            }
-            if let mime = item.file?.mimeType, mime.hasPrefix("image/") == false, item.image == nil {
-                return nil
-            }
+            let mime = item.file?.mimeType ?? ""
+            let lowercasedName = item.name?.lowercased() ?? ""
+            let isImage =
+                mime.hasPrefix("image/")
+                || item.image != nil
+                || item.photo != nil
+                || lowercasedName.hasSuffix(".jpg")
+                || lowercasedName.hasSuffix(".jpeg")
+                || lowercasedName.hasSuffix(".png")
+                || lowercasedName.hasSuffix(".heic")
+            guard isImage else { return nil }
             return MediaItem(
                 id: item.id,
-                downloadUrl: downloadURL,
+                downloadUrl: item.downloadUrl.flatMap(URL.init(string:)),
                 pixelWidth: item.image?.width,
                 pixelHeight: item.image?.height
             )
@@ -320,8 +380,10 @@ private struct DriveItem: Decodable {
     let name: String?
     let webUrl: URL?
     let bundle: BundleFacet?
+    let folder: FolderFacet?
     let file: FileFacet?
     let image: ImageFacet?
+    let photo: PhotoFacet?
     let downloadUrl: String?
 
     enum CodingKeys: String, CodingKey {
@@ -329,8 +391,10 @@ private struct DriveItem: Decodable {
         case name
         case webUrl
         case bundle
+        case folder
         case file
         case image
+        case photo
         case downloadUrl = "@microsoft.graph.downloadUrl"
     }
 }
@@ -342,6 +406,10 @@ private struct BundleFacet: Decodable {
 
 private struct AlbumFacet: Decodable {}
 
+private struct FolderFacet: Decodable {
+    let childCount: Int?
+}
+
 private struct FileFacet: Decodable {
     let mimeType: String?
 }
@@ -350,6 +418,8 @@ private struct ImageFacet: Decodable {
     let width: Int?
     let height: Int?
 }
+
+private struct PhotoFacet: Decodable {}
 
 private struct DriveItemExpandedChildrenResponse: Decodable {
     let children: [DriveItem]?
