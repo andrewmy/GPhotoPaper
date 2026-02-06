@@ -19,9 +19,10 @@
 
 ### Current implementation status
 
-- Present today (working): **MSAL** auth + **folder-based** Graph fetching.
-- Transitional code to expect refactors:
-  - `OneDrivePhotosService` will switch from folders to **album bundles** (`/drive/bundles`).
+- Present today (working): **MSAL** auth + **album-based** Graph fetching (bundle albums via `/drive/bundles`).
+- Notes:
+  - For some personal accounts, `$filter=bundle/album ne null` can return 0 even when albums exist in OneDrive Photos.
+  - The app treats `photos.onedrive.com` bundle URLs as albums (and uses `bundle.album` when available).
 
 ### Config & scopes (today)
 

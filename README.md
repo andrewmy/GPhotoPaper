@@ -117,6 +117,7 @@ xcodebuild -scheme GPhotoPaper -destination 'platform=macOS' -derivedDataPath /t
 1.  Configure the wallpaper change frequency and selection settings in the app.
 2.  Sign in to OneDrive.
 3.  Load albums and select an album (or paste an album ID manually).
+    - To create/manage albums, use OneDrive Photos (https://photos.onedrive.com) and then reload albums in the app.
 4.  Click "Change Wallpaper Now" to update immediately.
 
 ## Dev Notes

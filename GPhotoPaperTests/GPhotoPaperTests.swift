@@ -93,14 +93,37 @@ struct GPhotoPaperTests {
         let (session, handlerId) = makeSession { request in
             recorder.record(request)
 
-            let json = """
-            {
-              "value": [
-                { "id": "a1", "name": "Album 1", "webUrl": "https://onedrive.example/a1", "bundle": { "album": {} } },
-                { "id": "x1", "name": "Not an album", "webUrl": "https://onedrive.example/x1", "bundle": { } }
-              ]
+            let json: String
+            if request.url?.path.hasSuffix("/me/drive") == true {
+                json = """
+                { "id": "d1" }
+                """
+            } else if request.url?.path.hasSuffix("/drives/d1/bundles") == true {
+                let isFiltered = request.url?.query?.contains("bundle%2Falbum%20ne%20null") == true
+                    || request.url?.query?.contains("bundle/album%20ne%20null") == true
+                if isFiltered {
+                    json = """
+                    {
+                      "value": [
+                        { "id": "a1", "name": "Album 1", "webUrl": "https://onedrive.example/a1", "bundle": { "album": {} } }
+                      ]
+                    }
+                    """
+                } else {
+                    json = """
+                    {
+                      "value": [
+                        { "id": "a1", "name": "Album 1", "webUrl": "https://onedrive.example/a1", "bundle": { "album": {} } },
+                        { "id": "x1", "name": "Not an album", "webUrl": "https://onedrive.example/x1", "bundle": { } }
+                      ]
+                    }
+                    """
+                }
+            } else {
+                json = """
+                { "value": [] }
+                """
             }
-            """
             let data = Data(json.utf8)
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, data)
@@ -111,9 +134,10 @@ struct GPhotoPaperTests {
         let albums = try await service.listAlbums()
         #expect(albums.count == 1)
         #expect(albums.first?.id == "a1")
-        #expect(recorder.requests.count == 1)
-        #expect(recorder.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
-        #expect(recorder.requests.first?.url?.path.hasSuffix("/me/drive/bundles") == true)
+        #expect(recorder.requests.count == 2)
+        #expect(recorder.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer test-token" })
+        #expect(recorder.requests.first?.url?.path.hasSuffix("/me/drive") == true)
+        #expect(recorder.requests.last?.url?.path.hasSuffix("/drives/d1/bundles") == true)
     }
 
     @Test func verifyAlbumExistsReturnsAlbumWhenBundleAlbumFacetPresent() async throws {
@@ -185,5 +209,35 @@ struct GPhotoPaperTests {
         #expect(photos.first?.pixelHeight == 1080)
         #expect(recorder.requests.count == 2)
         #expect(recorder.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer test-token" })
+    }
+
+    @Test func listAlbumsFallsBackToUnfilteredWhenFilterReturnsEmpty() async throws {
+        let (session, handlerId) = makeSession { request in
+            let json: String
+            let isFiltered = request.url?.query?.contains("bundle%2Falbum%20ne%20null") == true
+                || request.url?.query?.contains("bundle/album%20ne%20null") == true
+            if isFiltered {
+                json = """
+                { "value": [] }
+                """
+            } else {
+                json = """
+                {
+                  "value": [
+                    { "id": "a1", "name": "Album 1", "webUrl": "https://photos.onedrive.com/album/a1" },
+                    { "id": "x1", "name": "Not an album", "webUrl": "https://onedrive.example/x1", "bundle": { } }
+                  ]
+                }
+                """
+            }
+            let data = Data(json.utf8)
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, data)
+        }
+        defer { MockURLProtocol.removeHandler(for: handlerId) }
+
+        let service = OneDrivePhotosService(authService: TestTokenProvider(), session: session)
+        let albums = try await service.listAlbums()
+        #expect(albums.map(\.id) == ["a1"])
     }
 }

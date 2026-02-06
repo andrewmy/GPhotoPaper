@@ -9,7 +9,11 @@ struct SettingsView: View {
     @State private var albums: [OneDriveAlbum] = []
     @State private var isSigningIn: Bool = false
     @State private var isLoadingAlbums: Bool = false
+    @State private var didAttemptLoadAlbums: Bool = false
     @State private var oneDriveError: String?
+#if DEBUG
+    @State private var oneDriveDebugInfo: String?
+#endif
 
     var body: some View {
         Form {
@@ -50,26 +54,50 @@ struct SettingsView: View {
 
             Section(header: Text("OneDrive Album")) {
                 if authService.isSignedIn {
-                    Button(isLoadingAlbums ? "Loading…" : "Load Albums") {
-                        isLoadingAlbums = true
-                        oneDriveError = nil
-                        Task {
-                            do {
-                                albums = try await photosService.listAlbums()
-                                if settings.selectedAlbumId == nil, let first = albums.first {
-                                    applySelectedAlbum(first)
+                    HStack {
+                        Button(isLoadingAlbums ? "Loading…" : "Load Albums") {
+                            isLoadingAlbums = true
+                            oneDriveError = nil
+                            Task {
+                                do {
+                                    albums = try await photosService.listAlbums()
+                                    if settings.selectedAlbumId == nil, let first = albums.first {
+                                        applySelectedAlbum(first)
+                                    }
+                                } catch {
+                                    oneDriveError = error.localizedDescription
                                 }
-                            } catch {
-                                oneDriveError = error.localizedDescription
+                                didAttemptLoadAlbums = true
+                                isLoadingAlbums = false
                             }
-                            isLoadingAlbums = false
                         }
+                        .disabled(isLoadingAlbums)
+
+                        Link("Manage Albums…", destination: URL(string: "https://photos.onedrive.com")!)
                     }
-                    .disabled(isLoadingAlbums)
 
                     if albums.isEmpty {
-                        Text("No albums loaded yet.")
+                        Text(didAttemptLoadAlbums ? "No albums found via Microsoft Graph." : "No albums loaded yet.")
                             .foregroundStyle(.secondary)
+                        if didAttemptLoadAlbums {
+                            Text("Create/manage albums in OneDrive Photos, then reload here.")
+                                .foregroundStyle(.secondary)
+#if DEBUG
+                            Button("Debug: Probe Albums") {
+                                oneDriveDebugInfo = nil
+                                Task {
+                                    oneDriveDebugInfo = await photosService.debugProbeAlbumListing()
+                                }
+                            }
+                            if let oneDriveDebugInfo, !oneDriveDebugInfo.isEmpty {
+                                Text(oneDriveDebugInfo)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+#endif
+                        }
                     } else {
                         Picker(
                             "Album",

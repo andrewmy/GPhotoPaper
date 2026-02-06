@@ -8,14 +8,14 @@ This document outlines the plan to integrate OneDrive for photo management, targ
 - Core wallpaper pipeline exists (`WallpaperManager`) and settings UI exists.
 - Implemented:
   - `OneDriveAuthService`: **MSAL** wrapper (interactive sign-in, silent token acquisition, sign-out).
-  - `OneDrivePhotosService`: Microsoft Graph v1.0 for **folders** (list root folders, verify folder, fetch photos in a folder).
-  - Settings UI: sign-in + basic **folder** selection.
+  - `OneDrivePhotosService`: Microsoft Graph v1.0 for **albums (bundle albums)** (list albums, verify album, fetch photos in an album).
+  - Settings UI: sign-in + **album** selection (+ link to manage albums in OneDrive Photos).
 - CLI builds: `xcodebuild -scheme GPhotoPaper -destination 'platform=macOS' ... build` succeeds when the environment has keychain/signing access.
 
-### What works today (folder mode)
+### What works today (album mode)
 
 - Sign in/out (MSAL) and silent token acquisition for scheduled wallpaper updates.
-- List root folders, select a folder, and fetch image items from that folder via Graph.
+- List albums, select an album, and fetch image items from that album via Graph.
 - Wallpaper update:
   - Downloads `@microsoft.graph.downloadUrl`
   - Applies filtering (min width, horizontal only) when image dimensions are available
@@ -46,6 +46,15 @@ This document outlines the plan to integrate OneDrive for photo management, targ
 
 Note: Bundle/album APIs are **personal Microsoft account** focused. If we later want to support work/school tenants, plan a fallback source mode (folder selection or in-app “virtual set”).
 
+### Graph v1.0 quirk (personal accounts)
+
+In practice (at least for some personal accounts), `bundle.album` is not reliably present and the `$filter=bundle/album ne null` query can return an empty list even when OneDrive Photos shows albums.
+
+Current implementation uses the bundles endpoints and identifies “album-like” bundles using:
+
+- `bundle.album` when present, OR
+- `webUrl` host `photos.onedrive.com` (matches the OneDrive Photos album UI).
+
 ## Remaining work (phased)
 
 ### Phase 1 — Switch auth to MSAL (done)
@@ -64,11 +73,10 @@ Note: Bundle/album APIs are **personal Microsoft account** focused. If we later 
 - Cleanup (later):
   - Remove the native `ASWebAuthenticationSession` + PKCE fallback once MSAL is stable.
 
-### Phase 2 — Albums API (Graph bundles)
+### Phase 2 — Albums API (Graph bundles) (done)
 
 - Update the service layer:
   - Add `listAlbums()`, `verifyAlbumExists(albumId:)`, `searchPhotos(in albumId:)` (album contents).
-  - Keep folder-based methods only as an optional fallback mode (or remove if not needed).
 - Update models:
   - Rename settings from folder to album: `selectedAlbumId`, `selectedAlbumName`, `selectedAlbumWebUrl`.
   - Ensure picture metadata is captured (`width/height`) to support filtering in `WallpaperManager`.
@@ -76,12 +84,13 @@ Note: Bundle/album APIs are **personal Microsoft account** focused. If we later 
   - Start: `User.Read Files.Read` (MSAL handles OIDC reserved scopes like `offline_access` automatically)
   - Add later if needed: `Files.ReadWrite` (create album / add items).
 
-### Phase 3 — UI update (albums instead of folders)
+### Phase 3 — UI update (albums instead of folders) (partially done)
 
-- Replace the folder picker with an album picker:
+- Album picker (done):
   - “Load albums” → list bundles
   - Selection persisted in settings
-  - Link to open the album (if `webUrl` is available from bundle metadata)
+  - Link to open the selected album (when `webUrl` is available from bundle metadata)
+  - Link to manage albums in OneDrive Photos
 - Startup behavior / validation:
   - On app start, verify the previously selected album still exists and is accessible.
   - When loading a stored selection, fetch photo count (or first page) and show a warning if the album has no photos.
@@ -101,6 +110,6 @@ Note: Bundle/album APIs are **personal Microsoft account** focused. If we later 
 
 ## Cleanup checklist
 
-- Remove folder-centric UI/strings once albums are the default.
+- Remove folder-centric UI/strings once albums are the default. (done)
 - Remove native OAuth implementation once MSAL is fully wired.
 - Ensure `Info.plist` contains only the final OAuth callback configuration and documented keys.

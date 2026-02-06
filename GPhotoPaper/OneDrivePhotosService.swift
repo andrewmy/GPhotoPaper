@@ -5,8 +5,18 @@ enum OneDriveGraphError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .httpError(let status, _):
-            return "Graph HTTP \(status)."
+        case .httpError(let status, let body):
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                return "Graph HTTP \(status)."
+            }
+
+            let maxChars = 800
+            let prefix = String(trimmed.prefix(maxChars))
+            if trimmed.count > maxChars {
+                return "Graph HTTP \(status): \(prefix)…"
+            }
+            return "Graph HTTP \(status): \(prefix)"
         }
     }
 }
@@ -28,18 +38,18 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
     }
 
     func listAlbums() async throws -> [OneDriveAlbum] {
-        let path = "/me/drive/bundles"
-        var components = URLComponents(url: graphURL(path), resolvingAgainstBaseURL: false)!
-        components.queryItems = [
-            .init(name: "$filter", value: "bundle/album ne null"),
-            .init(name: "$select", value: "id,name,webUrl,bundle"),
-        ]
-
-        return try await pagedDriveItems(startURL: components.url!) { page in
-            page.value
-                .filter { $0.bundle?.album != nil }
+        let filtered = try await listBundlesAsDriveItems(filterToAlbums: true)
+        if !filtered.isEmpty {
+            return filtered
+                .filter(Self.isAlbumCandidateStrict)
                 .map { OneDriveAlbum(id: $0.id, webUrl: $0.webUrl, name: $0.name) }
         }
+
+        // Some accounts return empty results when filtering by bundle album; retry unfiltered.
+        let unfiltered = try await listBundlesAsDriveItems(filterToAlbums: false)
+        return unfiltered
+            .filter(Self.isAlbumCandidateStrict)
+            .map { OneDriveAlbum(id: $0.id, webUrl: $0.webUrl, name: $0.name) }
     }
 
     func verifyAlbumExists(albumId: String) async throws -> OneDriveAlbum? {
@@ -49,7 +59,7 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
                 .init(name: "$select", value: "id,name,webUrl,bundle"),
             ]
         )
-        guard item.bundle?.album != nil else { return nil }
+        guard Self.isAlbumCandidateStrict(item) else { return nil }
         return OneDriveAlbum(id: item.id, webUrl: item.webUrl, name: item.name)
     }
 
@@ -101,9 +111,44 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    private func listBundlesAsDriveItems(filterToAlbums: Bool) async throws -> [DriveItem] {
+        func url(for path: String) -> URL {
+            var components = URLComponents(url: graphURL(path), resolvingAgainstBaseURL: false)!
+            var items: [URLQueryItem] = []
+            if filterToAlbums {
+                items.append(.init(name: "$filter", value: "bundle/album ne null"))
+            }
+            items.append(.init(name: "$select", value: "id,name,webUrl,bundle"))
+            components.queryItems = items
+            return components.url!
+        }
+
+        // Prefer an explicit drive-id form (seems to be the most reliable), then fall back.
+        if let driveId = try? await currentDriveId() {
+            let byId = try await pagedDriveItems(startURL: url(for: "/drives/\(driveId)/bundles")) { page in page.value }
+            if !byId.isEmpty { return byId }
+        }
+
+        let driveResults = try await pagedDriveItems(startURL: url(for: "/drive/bundles")) { page in page.value }
+        if !driveResults.isEmpty { return driveResults }
+
+        return try await pagedDriveItems(startURL: url(for: "/me/drive/bundles")) { page in page.value }
+    }
+
     private func graphURL(_ path: String) -> URL {
         let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
         return baseURL.appendingPathComponent(trimmed)
+    }
+
+    private func currentDriveId() async throws -> String {
+        struct DriveResponse: Decodable { let id: String }
+        let drive: DriveResponse = try await get(
+            "/me/drive",
+            query: [
+                .init(name: "$select", value: "id"),
+            ]
+        )
+        return drive.id
     }
 
     private static func mediaItems(from driveItems: [DriveItem]) -> [MediaItem] {
@@ -122,6 +167,116 @@ final class OneDrivePhotosService: ObservableObject, PhotosService {
             )
         }
     }
+
+    private static func isAlbumCandidateStrict(_ item: DriveItem) -> Bool {
+        // Prefer signals that match OneDrive Photos “Albums”.
+        if item.bundle?.album != nil { return true }
+        if let url = item.webUrl, url.host == "photos.onedrive.com" { return true }
+        return false
+    }
+
+#if DEBUG
+    func debugProbeAlbumListing() async -> String {
+        struct ProbeResponse {
+            let label: String
+            let status: Int?
+            let valueCount: Int?
+            let bodyPrefix: String
+            let error: String?
+        }
+
+        func bodyPrefix(from data: Data) -> String {
+            let str = String(data: data, encoding: .utf8) ?? ""
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            let maxChars = 1200
+            let prefix = String(trimmed.prefix(maxChars))
+            return trimmed.count > maxChars ? "\(prefix)…" : prefix
+        }
+
+        func rawGet(url: URL) async -> ProbeResponse {
+            do {
+                let accessToken = try await authService.validAccessToken()
+                var request = URLRequest(url: url)
+                request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                let (data, response) = try await session.data(for: request)
+                let http = response as? HTTPURLResponse
+                let status = http?.statusCode
+
+                var decodedCount: Int?
+                if let status, (200...299).contains(status),
+                   let decoded = try? JSONDecoder().decode(DriveItemListResponse.self, from: data) {
+                    decodedCount = decoded.value.count
+                }
+
+                return ProbeResponse(
+                    label: url.path + (url.query.map { "?\($0)" } ?? ""),
+                    status: status,
+                    valueCount: decodedCount,
+                    bodyPrefix: bodyPrefix(from: data),
+                    error: nil
+                )
+            } catch {
+                return ProbeResponse(
+                    label: url.absoluteString,
+                    status: nil,
+                    valueCount: nil,
+                    bodyPrefix: "",
+                    error: error.localizedDescription
+                )
+            }
+        }
+
+        func format(_ probe: ProbeResponse) -> String {
+            var lines: [String] = ["• \(probe.label)"]
+            if let status = probe.status { lines.append("  status: \(status)") }
+            if let valueCount = probe.valueCount { lines.append("  value.count: \(valueCount)") }
+            if let error = probe.error, !error.isEmpty { lines.append("  error: \(error)") }
+            if !probe.bodyPrefix.isEmpty { lines.append("  body: \(probe.bodyPrefix)") }
+            return lines.joined(separator: "\n")
+        }
+
+        let driveInfoURL: URL = {
+            var components = URLComponents(url: graphURL("/me/drive"), resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                .init(name: "$select", value: "id,driveType,owner,webUrl"),
+            ]
+            return components.url!
+        }()
+
+        var probes: [ProbeResponse] = [await rawGet(url: driveInfoURL)]
+
+        let driveId = (try? await currentDriveId())
+        if let driveId {
+            for (path, addAlbumFilter) in [
+                ("/drives/\(driveId)/bundles", false),
+                ("/drives/\(driveId)/bundles", true),
+            ] {
+                var components = URLComponents(url: graphURL(path), resolvingAgainstBaseURL: false)!
+                var items: [URLQueryItem] = [
+                    .init(name: "$select", value: "id,name,webUrl,bundle"),
+                    .init(name: "$top", value: "10"),
+                ]
+                if addAlbumFilter {
+                    items.insert(.init(name: "$filter", value: "bundle/album ne null"), at: 0)
+                }
+                components.queryItems = items
+                probes.append(await rawGet(url: components.url!))
+            }
+        }
+
+        for ep in ["/drive/bundles", "/me/drive/bundles"] {
+            var components = URLComponents(url: graphURL(ep), resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                .init(name: "$select", value: "id,name,webUrl,bundle"),
+                .init(name: "$top", value: "10"),
+            ]
+            probes.append(await rawGet(url: components.url!))
+        }
+
+        return (["OneDrive albums probe (no tokens shown):"]
+            + probes.map(format)).joined(separator: "\n")
+    }
+#endif
 
     private func pagedDriveItems<U>(
         startURL: URL,
@@ -182,6 +337,7 @@ private struct DriveItem: Decodable {
 
 private struct BundleFacet: Decodable {
     let album: AlbumFacet?
+    let childCount: Int?
 }
 
 private struct AlbumFacet: Decodable {}
