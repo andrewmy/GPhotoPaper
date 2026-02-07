@@ -44,6 +44,7 @@
 
 - Keep services behind protocols where it helps testability (`PhotosService`).
 - Prefer concise errors and minimal UI state in views.
+- When making behavioral changes, **add or update unit tests** to cover them whenever practical.
 
 ### Context
 

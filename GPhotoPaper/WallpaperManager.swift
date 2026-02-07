@@ -9,10 +9,24 @@ final class WallpaperManager: ObservableObject {
         case manual
     }
 
+    enum WallpaperUpdateStage: Equatable {
+        case idle
+        case fetchingAlbumItems
+        case filtering
+        case selectingCandidate(attempt: Int, total: Int, name: String)
+        case usingCachedWallpaper(name: String)
+        case downloading(name: String, attempt: Int, total: Int)
+        case decoding(name: String)
+        case writingFile(name: String)
+        case applyingToScreens(screenCount: Int)
+        case done(name: String)
+    }
+
     @Published private(set) var lastSuccessfulUpdate: Date?
     @Published private(set) var nextScheduledUpdate: Date?
     @Published private(set) var lastUpdateError: String?
     @Published private(set) var isUpdating: Bool = false
+    @Published private(set) var updateStage: WallpaperUpdateStage = .idle
 
     private let photosService: any PhotosService
     private let settings: SettingsModel
@@ -27,6 +41,51 @@ final class WallpaperManager: ObservableObject {
         self.photosService = photosService
         self.settings = settings
         self.lastSuccessfulUpdate = settings.lastSuccessfulWallpaperUpdate
+    }
+
+    struct WallpaperCandidate {
+        let item: MediaItem
+        let filteredIndex: Int?
+    }
+
+    nonisolated static func buildWallpaperCandidates(
+        filteredItems: [MediaItem],
+        maxAttempts: Int,
+        pickRandomly: Bool,
+        lastPickedIndex: Int,
+        avoidItemId: String?
+    ) -> [WallpaperCandidate] {
+        guard filteredItems.isEmpty == false, maxAttempts > 0 else { return [] }
+
+        if pickRandomly {
+            var pool = filteredItems
+            if let avoidItemId, filteredItems.count > 1 {
+                let withoutAvoid = filteredItems.filter { $0.id != avoidItemId }
+                if withoutAvoid.isEmpty == false {
+                    pool = withoutAvoid
+                }
+            }
+            return Array(pool.shuffled().prefix(maxAttempts)).map { WallpaperCandidate(item: $0, filteredIndex: nil) }
+        }
+
+        var list: [WallpaperCandidate] = []
+        let startIndex = (lastPickedIndex + 1) % filteredItems.count
+
+        for offset in 0..<filteredItems.count {
+            if list.count >= maxAttempts { break }
+            let idx = (startIndex + offset) % filteredItems.count
+            let item = filteredItems[idx]
+
+            if let avoidItemId, filteredItems.count > 1, item.id == avoidItemId {
+                continue
+            }
+            list.append(WallpaperCandidate(item: item, filteredIndex: idx))
+        }
+
+        if list.isEmpty, let only = filteredItems.first {
+            list = [WallpaperCandidate(item: only, filteredIndex: 0)]
+        }
+        return list
     }
 
     func startWallpaperUpdates() {
@@ -61,6 +120,7 @@ final class WallpaperManager: ObservableObject {
         inFlightUpdateId = updateId
         inFlightUpdateTrigger = trigger
         isUpdating = true
+        updateStage = .fetchingAlbumItems
 
         inFlightUpdateTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -70,6 +130,9 @@ final class WallpaperManager: ObservableObject {
                     self.inFlightUpdateId = nil
                     self.inFlightUpdateTrigger = nil
                     self.isUpdating = false
+                    if self.updateStage != .idle {
+                        self.updateStage = .idle
+                    }
                 }
             }
             await self.updateWallpaper(trigger: trigger)
@@ -156,9 +219,11 @@ final class WallpaperManager: ObservableObject {
         do {
             lastAttemptDate = Date()
 
+            updateStage = .fetchingAlbumItems
             let mediaItems = try await photosService.searchPhotos(inAlbumId: albumId)
             if Task.isCancelled { return }
 
+            updateStage = .filtering
             let filteredItems = filterMediaItems(mediaItems)
             settings.albumPictureCount = filteredItems.count
             settings.showNoPicturesWarning = filteredItems.isEmpty
@@ -171,43 +236,13 @@ final class WallpaperManager: ObservableObject {
             let maxDimension = WallpaperImageTranscoder.maxRecommendedDisplayPixelDimension()
 
             let maxAttempts = min(3, filteredItems.count)
-            struct Candidate {
-                let item: MediaItem
-                let filteredIndex: Int?
-            }
-
-            let candidates: [Candidate]
-            if settings.pickRandomly {
-                var pool = filteredItems
-                if let lastId = settings.lastSetWallpaperItemId, filteredItems.count > 1 {
-                    let withoutLast = filteredItems.filter { $0.id != lastId }
-                    if withoutLast.isEmpty == false {
-                        pool = withoutLast
-                    }
-                }
-                candidates = Array(pool.shuffled().prefix(maxAttempts)).map { Candidate(item: $0, filteredIndex: nil) }
-            } else {
-                var list: [Candidate] = []
-                let startIndex = (settings.lastPickedIndex + 1) % filteredItems.count
-                let avoidId = settings.lastSetWallpaperItemId
-
-                for offset in 0..<filteredItems.count {
-                    if list.count >= maxAttempts { break }
-                    let idx = (startIndex + offset) % filteredItems.count
-                    let item = filteredItems[idx]
-
-                    if let avoidId, filteredItems.count > 1, item.id == avoidId {
-                        continue
-                    }
-                    list.append(Candidate(item: item, filteredIndex: idx))
-                }
-
-                // If we only have one usable item, allow it.
-                if list.isEmpty, let only = filteredItems.first {
-                    list = [Candidate(item: only, filteredIndex: 0)]
-                }
-                candidates = list
-            }
+            let candidates = Self.buildWallpaperCandidates(
+                filteredItems: filteredItems,
+                maxAttempts: maxAttempts,
+                pickRandomly: settings.pickRandomly,
+                lastPickedIndex: settings.lastPickedIndex,
+                avoidItemId: settings.lastSetWallpaperItemId
+            )
 
             var conversionErrors: [String] = []
             var updatedSequentialIndex: Int?
@@ -220,8 +255,13 @@ final class WallpaperManager: ObservableObject {
                         continue
                     }
 
+                    let displayName = candidate.item.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let candidateName = (displayName?.isEmpty == false) ? displayName! : candidate.item.id
+                    updateStage = .selectingCandidate(attempt: i + 1, total: candidates.count, name: candidateName)
+
                     let wallpaperFileURL = wallpaperCacheFileURL(for: candidate.item, in: wallpaperDirURL)
                     if isUsableCachedWallpaperFile(at: wallpaperFileURL) {
+                        updateStage = .usingCachedWallpaper(name: candidateName)
                         var options: [NSWorkspace.DesktopImageOptionKey: Any] = [:]
 
                         switch settings.wallpaperFillMode {
@@ -243,15 +283,18 @@ final class WallpaperManager: ObservableObject {
 
                         updatedSequentialIndex = candidate.filteredIndex
                         settings.lastSetWallpaperItemId = candidate.item.id
+                        settings.lastSetWallpaperItemName = candidate.item.name
                         conversionErrors.removeAll()
                         didSetWallpaper = true
                         cleanupOldWallpaperFiles(in: wallpaperDirURL, keep: 50)
                         break
                     }
 
+                    updateStage = .downloading(name: candidateName, attempt: i + 1, total: candidates.count)
                     let rawData = try await photosService.downloadImageData(for: candidate.item)
                     if Task.isCancelled { return }
 
+                    updateStage = .decoding(name: candidateName)
                     let jpegData = try await WallpaperImageTranscoder.prepareWallpaperJPEGAsync(
                         from: rawData,
                         maxDimension: maxDimension,
@@ -259,6 +302,7 @@ final class WallpaperManager: ObservableObject {
                     )
 
                     if Task.isCancelled { return }
+                    updateStage = .writingFile(name: candidateName)
                     try jpegData.write(to: wallpaperFileURL, options: [.atomic])
 
                     var options: [NSWorkspace.DesktopImageOptionKey: Any] = [:]
@@ -278,10 +322,12 @@ final class WallpaperManager: ObservableObject {
                         options[.allowClipping] = false
                     }
 
+                    updateStage = .applyingToScreens(screenCount: NSScreen.screens.count)
                     try setWallpaperOnAllScreens(wallpaperFileURL, options: options)
 
                     updatedSequentialIndex = candidate.filteredIndex
                     settings.lastSetWallpaperItemId = candidate.item.id
+                    settings.lastSetWallpaperItemName = candidate.item.name
                     conversionErrors.removeAll()
                     didSetWallpaper = true
                     cleanupOldWallpaperFiles(in: wallpaperDirURL, keep: 50)
@@ -297,6 +343,7 @@ final class WallpaperManager: ObservableObject {
 
             guard Task.isCancelled == false else { return }
             guard didSetWallpaper else {
+                updateStage = .idle
                 if conversionErrors.isEmpty {
                     if filteredItems.count <= 1 {
                         lastUpdateError = "Only one usable photo is available, so the wallpaper can repeat."
@@ -318,13 +365,17 @@ final class WallpaperManager: ObservableObject {
             settings.lastSuccessfulWallpaperUpdate = now
             lastSuccessfulUpdate = now
             lastUpdateError = nil
+            let finalName = settings.lastSetWallpaperItemName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            updateStage = .done(name: (finalName?.isEmpty == false) ? finalName! : (settings.lastSetWallpaperItemId ?? ""))
 
         } catch is CancellationError {
             // Manual updates can cancel timer-driven updates; treat cancellation as expected.
             shouldScheduleAfter = false
+            updateStage = .idle
         } catch {
             print("Error updating wallpaper: \(error.localizedDescription)")
             lastUpdateError = error.localizedDescription
+            updateStage = .idle
         }
     }
 
@@ -374,9 +425,12 @@ final class WallpaperManager: ObservableObject {
             try? fm.removeItem(at: dir.appendingPathComponent("wallpaper.jpg"))
 
             settings.lastSetWallpaperItemId = nil
+            settings.lastSetWallpaperItemName = nil
             lastUpdateError = nil
+            updateStage = .idle
         } catch {
             lastUpdateError = error.localizedDescription
+            updateStage = .idle
         }
     }
 

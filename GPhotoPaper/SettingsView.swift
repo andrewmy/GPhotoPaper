@@ -7,6 +7,9 @@ struct SettingsView: View {
     @EnvironmentObject var photosService: OneDrivePhotosService
     @EnvironmentObject var wallpaperManager: WallpaperManager
 
+    private let usablePhotosHelp =
+        "Usable photos are image items (image/* files or items with image/photo metadata). Videos are ignored. RAW photos (ARW/DNG/etc) are included only when LibRaw support is enabled. The quick check scans only the first page."
+
     @State private var albums: [OneDriveAlbum] = []
     @State private var isSigningIn: Bool = false
     @State private var isLoadingAlbums: Bool = false
@@ -22,6 +25,31 @@ struct SettingsView: View {
 
     private var recommendedMinimumPictureWidthPixels: Double {
         Double(WallpaperImageTranscoder.maxRecommendedDisplayPixelWidth())
+    }
+
+    private func stageText(_ stage: WallpaperManager.WallpaperUpdateStage) -> String {
+        switch stage {
+        case .idle:
+            return "Idle"
+        case .fetchingAlbumItems:
+            return "Fetching album items…"
+        case .filtering:
+            return "Filtering candidates…"
+        case .selectingCandidate(let attempt, let total, let name):
+            return "Trying \(attempt)/\(max(1, total)): \(name)"
+        case .usingCachedWallpaper(let name):
+            return "Using cached: \(name)"
+        case .downloading(let name, let attempt, let total):
+            return "Downloading \(attempt)/\(max(1, total)): \(name)…"
+        case .decoding(let name):
+            return "Decoding/transcoding: \(name)…"
+        case .writingFile(let name):
+            return "Writing JPEG: \(name)…"
+        case .applyingToScreens(let screenCount):
+            return "Applying to \(screenCount) screen(s)…"
+        case .done(let name):
+            return name.isEmpty ? "Done" : "Done: \(name)"
+        }
     }
 
     var body: some View {
@@ -68,15 +96,8 @@ struct SettingsView: View {
                 }
             }
 
-            Section(header: Text("OneDrive Album").help("Usable photos are image items (image/* files or items with image/photo metadata). Videos are ignored. RAW photos (ARW/DNG/etc) are included only when LibRaw support is enabled. The quick check scans only the first page.")) {
+            Section(header: Text("OneDrive Album")) {
                 if authService.isSignedIn {
-                    Text("Usable photos are image items (image/* files or items with image/photo metadata). Videos are ignored. The quick check scans only the first page.")
-                        .font(.system(.caption))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-
                     HStack {
                         Button(isLoadingAlbums ? "Loading…" : "Load Albums") {
                             Task {
@@ -121,15 +142,26 @@ struct SettingsView: View {
                             }
                         }
                             .pickerStyle(.menu)
-                        .help("Photos are considered usable if they’re image items (image/* or with image/photo metadata). The app ignores videos. RAW formats require LibRaw support.")
 
                         if let albumId = settings.selectedAlbumId, !albumId.isEmpty {
                             if let count = selectedAlbumUsableCountFirstPage {
-                                Text("Usable photos (first page only): \(count)")
-                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text("Usable photos (first page only): \(count)")
+                                    Image(systemName: "questionmark.circle")
+                                        .foregroundStyle(.secondary)
+                                        .imageScale(.small)
+                                        .help(usablePhotosHelp)
+                                }
+                                .foregroundStyle(.secondary)
                             } else {
-                                Text("Usable photos (first page): …")
-                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text("Usable photos (first page): …")
+                                    Image(systemName: "questionmark.circle")
+                                        .foregroundStyle(.secondary)
+                                        .imageScale(.small)
+                                        .help(usablePhotosHelp)
+                                }
+                                .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -140,8 +172,14 @@ struct SettingsView: View {
 
                     if let albumId = settings.selectedAlbumId, !albumId.isEmpty {
                         if settings.albumPictureCount > 0 {
-                            Text("Usable photos (last scan): \(settings.albumPictureCount)")
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Text("Usable photos (last scan): \(settings.albumPictureCount)")
+                                Image(systemName: "questionmark.circle")
+                                    .foregroundStyle(.secondary)
+                                    .imageScale(.small)
+                                    .help(usablePhotosHelp)
+                            }
+                            .foregroundStyle(.secondary)
                         }
                         if settings.showNoPicturesWarning {
                             Text("No usable photos found (checked the first page for image items).")
@@ -165,44 +203,6 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
-
-                HStack {
-                    Text("Last changed")
-                    Spacer()
-                    if let last = wallpaperManager.lastSuccessfulUpdate {
-                        Text(last, style: .relative)
-                            .foregroundStyle(.secondary)
-                            .help(last.formatted(date: .abbreviated, time: .shortened))
-                    } else {
-                        Text("—")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack {
-                    Text("Next change")
-                    Spacer()
-                    if settings.changeFrequency == .never {
-                        Text("—")
-                            .foregroundStyle(.secondary)
-                    } else if let next = wallpaperManager.nextScheduledUpdate {
-                        Text(next, style: .relative)
-                            .foregroundStyle(.secondary)
-                            .help(next.formatted(date: .abbreviated, time: .shortened))
-                    } else {
-                        Text("—")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let error = wallpaperManager.lastUpdateError, !error.isEmpty {
-                    Text("Last error: \(error)")
-                        .font(.system(.caption))
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
 
                 Toggle("Pick Randomly", isOn: $settings.pickRandomly)
 
@@ -236,7 +236,14 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
             }
 
-            Section(header: Text("Advanced")) {
+            Section {
+                Button(wallpaperManager.isUpdating ? "Changing…" : "Change Wallpaper Now") {
+                    wallpaperManager.requestWallpaperUpdate(trigger: .manual)
+                }
+                .disabled(wallpaperManager.isUpdating)
+            }
+
+            Section {
                 Button {
                     showAdvancedControls.toggle()
                 } label: {
@@ -250,6 +257,7 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 4)
 
                 if showAdvancedControls {
                     VStack(alignment: .leading, spacing: 12) {
@@ -257,19 +265,21 @@ struct SettingsView: View {
                             Text("Album")
                                 .font(.system(.subheadline, weight: .semibold))
 
-                            if authService.isSignedIn {
-                                TextField(
-                                    "Album ID (manual)",
-                                    text: Binding(
-                                        get: { settings.selectedAlbumId ?? "" },
-                                        set: { settings.selectedAlbumId = $0.isEmpty ? nil : $0 }
-                                    )
-                                )
+	                            if authService.isSignedIn {
+	                                TextField(
+	                                    "Album ID (manual)",
+	                                    text: Binding(
+	                                        get: { settings.selectedAlbumId ?? "" },
+	                                        set: { settings.selectedAlbumId = $0.isEmpty ? nil : $0 }
+	                                    )
+	                                )
+	                                .textFieldStyle(.roundedBorder)
+	                                .frame(maxWidth: 420)
 
-                                if let albumId = settings.selectedAlbumId, !albumId.isEmpty {
-                                    Button("Validate Album ID") {
-                                        oneDriveError = nil
-                                        Task {
+	                                if let albumId = settings.selectedAlbumId, !albumId.isEmpty {
+	                                    Button("Validate Album ID") {
+	                                        oneDriveError = nil
+	                                        Task {
                                             do {
                                                 if let album = try await photosService.verifyAlbumExists(albumId: albumId) {
                                                     applySelectedAlbum(album)
@@ -347,22 +357,87 @@ struct SettingsView: View {
                     .padding(.leading, 18)
                 }
             }
+            header: {
+                Text("Advanced")
+                    .font(.headline)
+                    .textCase(nil)
+                    .padding(.top, 12)
+            }
 
             Section {
-                Button(wallpaperManager.isUpdating ? "Changing…" : "Change Wallpaper Now") {
-                    wallpaperManager.requestWallpaperUpdate(trigger: .manual)
-                }
-                .disabled(wallpaperManager.isUpdating)
-
-                if wallpaperManager.isUpdating {
-                    HStack(spacing: 8) {
+                HStack {
+                    Text("Activity")
+                    Spacer()
+                    if wallpaperManager.isUpdating {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Changing wallpaper…")
-                            .font(.system(.caption))
+                    }
+                    Text(stageText(wallpaperManager.updateStage))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(stageText(wallpaperManager.updateStage))
+                }
+
+                HStack {
+                    Text("Current photo")
+                    Spacer()
+                    let name = (settings.lastSetWallpaperItemName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if name.isEmpty {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(name)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(name)
+                    }
+                }
+
+                HStack {
+                    Text("Last changed")
+                    Spacer()
+                    if let last = wallpaperManager.lastSuccessfulUpdate {
+                        Text(last, style: .relative)
+                            .foregroundStyle(.secondary)
+                            .help(last.formatted(date: .abbreviated, time: .shortened))
+                    } else {
+                        Text("—")
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                HStack {
+                    Text("Next change")
+                    Spacer()
+                    if settings.changeFrequency == .never {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                    } else if let next = wallpaperManager.nextScheduledUpdate {
+                        Text(next, style: .relative)
+                            .foregroundStyle(.secondary)
+                            .help(next.formatted(date: .abbreviated, time: .shortened))
+                    } else {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let error = wallpaperManager.lastUpdateError, !error.isEmpty {
+                    Text("Last error: \(error)")
+                        .font(.system(.caption))
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            header: {
+                Text("Status")
+                    .font(.headline)
+                    .textCase(nil)
+                    .padding(.top, 16)
             }
         }
         .task(id: authService.isSignedIn) {

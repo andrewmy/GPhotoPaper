@@ -140,6 +140,66 @@ struct GPhotoPaperTests {
         #expect(recorder.requests.last?.url?.path.hasSuffix("/drives/d1/bundles") == true)
     }
 
+    @Test func graphErrorDescriptionTrimsAndCapsBody() throws {
+        let longBody = String(repeating: "x", count: 1200)
+        let error = OneDriveGraphError.httpError(status: 429, body: "  \(longBody)  ")
+        let desc = try #require(error.errorDescription)
+        #expect(desc.hasPrefix("Graph HTTP 429: "))
+        #expect(desc.contains("…"))
+        #expect(desc.count < 1000)
+    }
+
+    @Test func searchPhotosFiltersToUsableImagesAndOptionallyIncludesRAW() async throws {
+        let nextLink = "https://graph.microsoft.com/v1.0/me/drive/items/a1/children?$skiptoken=abc"
+        let (session, handlerId) = makeSession { request in
+            if request.url?.path.hasSuffix("/me/drive/items/a1") == true {
+                let json = """
+                {
+                  "id": "a1",
+                  "children": [
+                    { "id": "jpg1", "name": "one.jpg", "cTag": "c1", "file": { "mimeType": "image/jpeg" }, "image": { "width": 4000, "height": 3000 }, "@microsoft.graph.downloadUrl": "https://download.example/jpg1" },
+                    { "id": "heic1", "name": "two.HEIC", "cTag": "c2", "file": { "mimeType": "application/octet-stream" }, "@microsoft.graph.downloadUrl": "https://download.example/heic1" },
+                    { "id": "raw1", "name": "three.ARW", "cTag": "c3", "file": { "mimeType": "image/tiff" }, "@microsoft.graph.downloadUrl": "https://download.example/raw1" },
+                    { "id": "vid1", "name": "nope.mp4", "file": { "mimeType": "video/mp4" }, "@microsoft.graph.downloadUrl": "https://download.example/vid1" }
+                  ],
+                  "children@odata.nextLink": "\(nextLink)"
+                }
+                """
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(json.utf8)
+                )
+            }
+
+            if request.url?.absoluteString == nextLink {
+                let json = """
+                { "value": [ { "id": "png1", "name": "four.png", "cTag": "c4", "file": { "mimeType": "image/png" }, "@microsoft.graph.downloadUrl": "https://download.example/png1" } ] }
+                """
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(json.utf8)
+                )
+            }
+
+            throw URLError(.badURL)
+        }
+        defer { MockURLProtocol.removeHandler(for: handlerId) }
+
+        let service = OneDrivePhotosService(authService: TestTokenProvider(), session: session)
+        let items = try await service.searchPhotos(inAlbumId: "a1")
+
+        #expect(items.contains(where: { $0.id == "jpg1" }))
+        #expect(items.contains(where: { $0.id == "heic1" }))
+        #expect(items.contains(where: { $0.id == "png1" }))
+        #expect(items.contains(where: { $0.id == "vid1" }) == false)
+
+        if LibRawDecoder.isAvailable() {
+            #expect(items.contains(where: { $0.id == "raw1" }))
+        } else {
+            #expect(items.contains(where: { $0.id == "raw1" }) == false)
+        }
+    }
+
     @Test func verifyAlbumExistsReturnsAlbumWhenBundleAlbumFacetPresent() async throws {
         let recorder = RequestRecorder()
         let (session, handlerId) = makeSession { request in

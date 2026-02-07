@@ -80,6 +80,21 @@ struct WallpaperImageTranscoderTests {
         }
     }
 
+    @Test func rawUnsupportedThrowsClearErrorWhenLibRawDisabled() throws {
+        guard LibRawDecoder.isAvailable() == false else {
+            // CI/local builds with LibRaw enabled will attempt a real decode; skip here.
+            return
+        }
+
+        let bytes = Data("not a raw".utf8)
+        do {
+            _ = try WallpaperImageTranscoder.prepareWallpaperJPEG(from: bytes, maxDimension: 512, filenameHint: "x.arw")
+            #expect(Bool(false))
+        } catch {
+            #expect(error.localizedDescription.contains("RAW photos aren’t supported"))
+        }
+    }
+
     @Test func parsesPreferredTimingFromEDID() {
         var edid = Data(repeating: 0, count: 128)
         let base = 54
