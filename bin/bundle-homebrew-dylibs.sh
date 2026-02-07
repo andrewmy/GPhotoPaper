@@ -4,13 +4,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF' >&2
 Usage:
-  bundle-homebrew-dylibs.sh <app_path> <app_binary_name> <entitlements_path> [homebrew_prefix]
+  bundle-homebrew-dylibs.sh <app_path> <app_binary_name> [entitlements_path] [homebrew_prefix]
 
 Bundles any dylibs the app links against that are under the given Homebrew prefix (default: /opt/homebrew)
 into <app_path>/Contents/Frameworks, rewrites load paths to @rpath/<dylib>, and ad-hoc signs the result.
 
 Notes:
   - This is for local GH-release-style packaging. Developer ID signing + notarization are handled separately.
+  - If signing ad-hoc (the default), entitlements are not applied.
   - Compatibility depends on the bundled dylibs' LC_BUILD_VERSION (minos). If a dylib was built with a higher
     minimum macOS version than your deployment target, the app will not run on older macOS versions.
 EOF
@@ -26,7 +27,7 @@ app_binary="${2:-}"
 entitlements="${3:-}"
 prefix="${4:-/opt/homebrew}"
 
-if [[ -z "$app" || -z "$app_binary" || -z "$entitlements" ]]; then
+if [[ -z "$app" || -z "$app_binary" ]]; then
   usage
   exit 2
 fi
@@ -44,7 +45,9 @@ if [[ ! -f "$exe" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$entitlements" ]]; then
+identity="${CODESIGN_IDENTITY:--}"
+
+if [[ -n "$entitlements" && "$identity" != "-" && ! -f "$entitlements" ]]; then
   echo "error: entitlements file not found: $entitlements" >&2
   exit 1
 fi
@@ -125,12 +128,17 @@ done <"$queue_file"
 # Ad-hoc sign everything so the output is runnable after install_name_tool changes.
 # (Developer ID signing + notarization is handled separately.)
 find "$frameworks" -maxdepth 1 -type d -name "*.framework" -print0 | while IFS= read -r -d '' fw; do
-  codesign --force --sign - --timestamp=none "$fw"
+  codesign --force --sign "$identity" --timestamp=none "$fw"
 done
 find "$frameworks" -maxdepth 1 -type f -name "*.dylib" -print0 | while IFS= read -r -d '' dylib; do
-  codesign --force --sign - --timestamp=none "$dylib"
+  codesign --force --sign "$identity" --timestamp=none "$dylib"
 done
-codesign --force --sign - --timestamp=none --entitlements "$entitlements" "$app"
+
+if [[ "$identity" != "-" && -n "$entitlements" ]]; then
+  codesign --force --sign "$identity" --timestamp=none --entitlements "$entitlements" "$app"
+else
+  codesign --force --sign "$identity" --timestamp=none "$app"
+fi
 
 bundled_count="$(wc -l <"$queue_file" | tr -d ' ')"
 echo "Bundled ${bundled_count} Homebrew dylib(s) into $frameworks"
