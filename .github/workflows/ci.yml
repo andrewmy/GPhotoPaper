@@ -5,13 +5,32 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # Keep these in one place so we can bump the supported macOS baseline easily.
+  MACOS_RUNNER: macos-15
+  TARGET_MACOS_VERSION: "15.5"
+
 jobs:
   build-and-test:
-    runs-on: macos-latest
+    # Pin runner to keep Homebrew dylib compatibility stable for distribution.
+    # We target macOS >= TARGET_MACOS_VERSION, so ensure Homebrew bottles are built with minos <= that.
+    runs-on: "${{ env.MACOS_RUNNER }}"
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Runner info
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -a
+          uname -m
+
+      - name: Assert Apple silicon runner
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
 
       - name: Xcode version
         run: xcodebuild -version
@@ -21,6 +40,20 @@ jobs:
           set -euo pipefail
           brew install libraw
           LIBRAW_PREFIX="$(brew --prefix libraw)"
+          echo "LIBRAW_PREFIX=$LIBRAW_PREFIX" >> "$GITHUB_ENV"
+
+      - name: Verify LibRaw min macOS (<= 15.5)
+        run: |
+          set -euo pipefail
+          test -n "${LIBRAW_PREFIX:-}"
+
+          ls -1 "${LIBRAW_PREFIX}/lib"/libraw*.dylib >/dev/null
+          bash bin/check-dylib-minos.sh "${TARGET_MACOS_VERSION}" "${LIBRAW_PREFIX}/lib"/libraw*.dylib
+
+      - name: Enable LibRaw in build (xcconfig)
+        run: |
+          set -euo pipefail
+          test -n "${LIBRAW_PREFIX:-}"
           cat > LibRaw.xcconfig <<EOF
           // Auto-generated in CI (gitignored) to enable RAW decoding via LibRaw.
           LIBRAW_PREFIX = ${LIBRAW_PREFIX}
@@ -30,17 +63,51 @@ jobs:
           OTHER_LDFLAGS = \$(inherited) -lraw
           EOF
 
-      - name: Sanity build (no signing)
+      - name: Build Release app (arm64, no signing)
         run: |
           set -euo pipefail
           xcodebuild \
             -scheme GPhotoPaper \
             -destination 'platform=macOS' \
-            -derivedDataPath /tmp/gphotopaper_deriveddata \
+            -configuration Release \
+            -derivedDataPath /tmp/gphotopaper_deriveddata_release \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build
+
+          mkdir -p build/ci
+          rm -rf build/ci/GPhotoPaper.app
+          ditto /tmp/gphotopaper_deriveddata_release/Build/Products/Release/GPhotoPaper.app build/ci/GPhotoPaper.app
+
+      - name: Bundle Homebrew dylibs into app
+        run: |
+          set -euo pipefail
+          bash bin/bundle-homebrew-dylibs.sh build/ci/GPhotoPaper.app GPhotoPaper GPhotoPaper/GPhotoPaper.entitlements /opt/homebrew
+
+      - name: Verify no /opt/homebrew links remain
+        run: |
+          set -euo pipefail
+          if otool -L build/ci/GPhotoPaper.app/Contents/MacOS/GPhotoPaper | grep "/opt/homebrew"; then
+            echo "ERROR: App still links against /opt/homebrew paths" >&2
+            exit 1
+          fi
+          if find build/ci/GPhotoPaper.app/Contents/Frameworks -maxdepth 1 -type f -name "*.dylib" -print0 | xargs -0 -n 1 otool -L | grep "/opt/homebrew"; then
+            echo "ERROR: Bundled dylib(s) still link against /opt/homebrew paths" >&2
+            exit 1
+          fi
+
+      - name: Verify bundled dylibs min macOS (<= 15.5)
+        run: |
+          set -euo pipefail
+          # It's OK if there are no dylibs (LibRaw optional), but if present they must be <= 15.5.
+          if ls -1 build/ci/GPhotoPaper.app/Contents/Frameworks/*.dylib >/dev/null 2>&1; then
+            bash bin/check-dylib-minos.sh "${TARGET_MACOS_VERSION}" build/ci/GPhotoPaper.app/Contents/Frameworks/*.dylib
+          else
+            echo "No bundled dylibs found; skipping minos check"
+          fi
 
       - name: Unit tests (no UI tests, no signing)
         run: |
@@ -48,9 +115,22 @@ jobs:
           xcodebuild \
             -scheme GPhotoPaper \
             -destination 'platform=macOS' \
-            -derivedDataPath /tmp/gphotopaper_deriveddata \
+            -derivedDataPath /tmp/gphotopaper_deriveddata_test \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             test \
             -only-testing:GPhotoPaperTests
+
+      - name: Create distributable zip (for artifacts)
+        run: |
+          set -euo pipefail
+          mkdir -p build/artifacts
+          rm -f build/artifacts/GPhotoPaper-Release-arm64.zip
+          ditto -c -k --sequesterRsrc --keepParent build/ci/GPhotoPaper.app build/artifacts/GPhotoPaper-Release-arm64.zip
+
+      - name: Upload Release app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPhotoPaper-Release-arm64
+          path: build/artifacts/GPhotoPaper-Release-arm64.zip
