@@ -3,7 +3,7 @@
 ### Product direction
 
 - Target integration is **OneDrive** (Microsoft Graph) for **personal Microsoft accounts**.
-- Source of truth for roadmap/decisions: `ONEDRIVE_PLAN.md`.
+- Source of truth for roadmap/decisions: `docs/PROJECT_PLAN.md`.
 - Locked-in direction:
   - Auth: **MSAL**
   - Wallpaper source: **OneDrive Albums** (Graph bundle albums), not folders

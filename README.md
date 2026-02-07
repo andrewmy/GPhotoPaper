@@ -118,5 +118,5 @@ RAW decoding is optional and off by default. To enable it, follow `docs/LIBRAW.m
 
 ## Contributing
 
-- Roadmap / implementation notes: `ONEDRIVE_PLAN.md`
+- Roadmap / implementation notes: `docs/PROJECT_PLAN.md`
 - Repo guidance (contributors/Codex): `AGENTS.md`

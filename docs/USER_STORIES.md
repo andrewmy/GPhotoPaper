@@ -2,7 +2,7 @@
 
 This document outlines the user stories for the application, categorized into MVP (Minimum Viable Product) and Post-MVP features.
 
-Source of truth for technical implementation details and sequencing is `ONEDRIVE_PLAN.md` (MSAL auth + OneDrive Albums / Graph bundles).
+Source of truth for technical implementation details and sequencing is `docs/PROJECT_PLAN.md` (MSAL auth + OneDrive Albums / Graph bundles).
 
 ## MVP User Stories
 
@@ -41,7 +41,7 @@ These are features that would add significant value but are not essential for th
 
 ## Roadmap mapping
 
-This document describes user-facing outcomes. For implementation details, see `ONEDRIVE_PLAN.md`.
+This document describes user-facing outcomes. For implementation details, see `docs/PROJECT_PLAN.md`.
 
 *   **MVP stories** map primarily to:
     - Phase 2 — Albums API (Graph bundles)

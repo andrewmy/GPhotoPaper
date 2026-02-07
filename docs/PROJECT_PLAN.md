@@ -1,6 +1,6 @@
-# OneDrive Integration Battle Plan
+# GPhotoPaper Project Plan
 
-This document outlines the plan to integrate OneDrive for photo management, targeting **personal Microsoft accounts** and using **Microsoft Graph Albums (bundles)** as the primary wallpaper source.
+This document outlines the technical plan for GPhotoPaper, including the OneDrive/Graph integration, wallpaper pipeline, and release/distribution work.
 
 ## Current status (repo)
 
@@ -11,6 +11,18 @@ This document outlines the plan to integrate OneDrive for photo management, targ
   - `OneDrivePhotosService`: Microsoft Graph v1.0 for **albums (bundle albums)** (list albums, verify album, fetch photos in an album).
   - Settings UI: sign-in + **album** selection (+ link to manage albums in OneDrive Photos).
 - CLI builds: `xcodebuild -scheme GPhotoPaper -destination 'platform=macOS' ... build` succeeds when the environment has keychain/signing access.
+
+## Distribution (GH Releases)
+
+- Target builds: **Apple silicon only** (`arm64`).
+- If RAW (LibRaw) support is enabled, the app links against Homebrew dylibs by default (e.g. `libraw`, plus transitive deps).
+  - For GitHub Releases, bundle required Homebrew dylibs into `GPhotoPaper.app/Contents/Frameworks` and rewrite load paths to `@rpath/...`.
+  - The repo includes a local build helper: `just release-app`, which copies a Release `.app` into `build/release-app/` and bundles Homebrew dylibs.
+- Important compatibility check: ensure bundled dylibs are built for a minimum macOS version that matches the app’s deployment target.
+  - Example: Homebrew dylibs built on newer macOS can have a higher `minos` (`LC_BUILD_VERSION`) than the app target, which will break on older macOS versions.
+- Codesigning / notarization (planned):
+  - Developer ID sign (hardened runtime), notarize, staple, then package (DMG/ZIP).
+  - Validate on a clean machine/VM without Homebrew installed and with quarantine enabled.
 
 ### What works today (album mode)
 
