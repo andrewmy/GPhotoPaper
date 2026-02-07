@@ -32,6 +32,15 @@ LibRaw is relatively small, focused (camera RAW decode), and can be shipped as a
 
 If LibRaw isn’t enabled, the app will **exclude RAW items** from “usable photos”.
 
+## GitHub Actions CI
+
+The CI workflow on `macos-latest` installs LibRaw via Homebrew and generates a temporary `LibRaw.xcconfig` in the repo root (which is gitignored) so builds/tests run with RAW decoding enabled:
+
+- Workflow: `.github/workflows/ci.yml`
+- Step: “Install LibRaw (Homebrew)”
+
+This is intended for **CI builds only**. For shipping, prefer static linking / an XCFramework to avoid bundling Homebrew `.dylib` dependencies inside the app.
+
 ## Shipping & notarization (first macOS app mental model)
 
 ### Why “it works on my Mac” often fails after you zip the app
@@ -61,4 +70,3 @@ For a non–App Store distribution, the typical flow is:
 - Staple the ticket to the app.
 
 Xcode can do this for Archives. If you later automate it, the command-line tooling is `xcrun notarytool`.
-

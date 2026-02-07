@@ -103,6 +103,10 @@ If UI tests fail to bootstrap in your environment, run only unit tests:
 xcodebuild -scheme GPhotoPaper -destination 'platform=macOS' -derivedDataPath /tmp/gphotopaper_deriveddata test -only-testing:GPhotoPaperTests
 ```
 
+#### RAW photos (LibRaw)
+
+RAW decoding is optional and off by default. To enable it, follow `docs/LIBRAW.md`. CI installs LibRaw via Homebrew automatically (see `.github/workflows/ci.yml`).
+
 ## Usage
 
 1.  Configure the wallpaper change frequency and selection settings in the app.
